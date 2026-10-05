@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AceTrace Studio - Interactive Shot Tracker Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="top-nav">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+            <path d="M4 19C7 19 9 14 12 8C15 2 17 5 20 5" stroke="url(#logo-gradient)" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="20" cy="5" r="3" fill="#00E5FF"/>
+            <defs>
+              <linearGradient id="logo-gradient" x1="4" y1="19" x2="20" y2="5" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#FF2D95"/>
+                <stop offset="1" stop-color="#00E5FF"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">AceTrace</span>
+          <span class="brand-badge">Native Studio Simulator</span>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button id="btn-load-demo" class="btn btn-secondary">
+          <span class="icon">⛳</span> Demo Golf Shot
+        </button>
+        <button id="btn-load-disc" class="btn btn-secondary">
+          <span class="icon">🥏</span> Demo Disc Golf
+        </button>
+        <label class="btn btn-secondary file-upload-btn">
+          <span class="icon">📁</span> Chọn Video Máy
+          <input type="file" id="video-file-input" accept="video/*" hidden>
+        </label>
+        <button id="btn-save-project" class="btn btn-secondary">
+          <span class="icon">💾</span> Lưu JSON
+        </button>
+        <label class="btn btn-secondary file-upload-btn">
+          <span class="icon">📂</span> Mở JSON
+          <input type="file" id="json-file-input" accept=".json" hidden>
+        </label>
+        <button id="btn-export-video" class="btn btn-primary glow-cyan">
+          <span class="icon">⚡</span> Xuất Video HD
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left / Side Panel: Keypoints & Styles -->
+      <aside class="sidebar">
+        <!-- Keypoints Section -->
+        <div class="glass-card panel-section">
+          <div class="section-title">
+            <span class="icon-indicator cyan"></span>
+            <h3>Điểm Neo Quỹ Đạo</h3>
+          </div>
+          <p class="section-desc">Chọn điểm rồi click/chạm lên video để đặt vị trí bóng.</p>
+
+          <div class="keypoint-selector">
+            <button class="kp-btn active" data-role="start" id="kp-start-btn">
+              <span class="dot start-dot"></span>
+              <div class="kp-info">
+                <span class="kp-name">1. Start (Phóng)</span>
+                <span class="kp-coord" id="coord-start">Frame: 30</span>
+              </div>
+            </button>
+            <button class="kp-btn" data-role="apex" id="kp-apex-btn">
+              <span class="dot apex-dot"></span>
+              <div class="kp-info">
+                <span class="kp-name">2. Apex (Đỉnh cao)</span>
+                <span class="kp-coord" id="coord-apex">Frame: 65</span>
+              </div>
+            </button>
+            <button class="kp-btn" data-role="landing" id="kp-landing-btn">
+              <span class="dot landing-dot"></span>
+              <div class="kp-info">
+                <span class="kp-name">3. Landing (Điểm rơi)</span>
+                <span class="kp-coord" id="coord-landing">Frame: 110</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="curve-mode-switch">
+            <span class="label">Thuật toán đường cong:</span>
+            <div class="toggle-group">
+              <button class="toggle-btn active" id="mode-bezier" data-mode="bezier">Cubic Bezier</button>
+              <button class="toggle-btn" id="mode-catmull" data-mode="catmullRom">Catmull-Rom</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- VFX Styling Section -->
+        <div class="glass-card panel-section">
+          <div class="section-title">
+            <span class="icon-indicator pink"></span>
+            <h3>Hiệu Ứng Neon VFX</h3>
+          </div>
+
+          <!-- Color Palettes -->
+          <div class="control-group">
+            <label>Bảng màu Preset:</label>
+            <div class="palette-grid">
+              <button class="palette-swatch active" data-palette="neonCyan" style="background: linear-gradient(135deg, #00E5FF, #FF2D95, #FFB300);"></button>
+              <button class="palette-swatch" data-palette="electricSunset" style="background: linear-gradient(135deg, #FF0055, #FF5500, #FFAA00);"></button>
+              <button class="palette-swatch" data-palette="acidGreen" style="background: linear-gradient(135deg, #00FF66, #00E5FF, #0088FF);"></button>
+              <button class="palette-swatch" data-palette="cyberPurple" style="background: linear-gradient(135deg, #B500FF, #FF0077, #00FFFF);"></button>
+              <button class="palette-swatch" data-palette="iceFire" style="background: linear-gradient(135deg, #FFFFFF, #00E5FF, #0044FF);"></button>
+            </div>
+          </div>
+
+          <!-- Trail Modes -->
+          <div class="control-group">
+            <label>Kiểu vệt bay (Trail Mode):</label>
+            <div class="trail-mode-grid">
+              <button class="mode-pill active" data-trail="tracer">Tracer (Chạy theo bóng)</button>
+              <button class="mode-pill" data-trail="full">Full (Toàn bộ đường)</button>
+              <button class="mode-pill" data-trail="comet">Comet (Đuôi sao băng)</button>
+            </div>
+          </div>
+
+          <!-- Sliders -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label>Độ phát sáng (Glow Bloom):</label>
+              <span id="glow-val" class="slider-val">75%</span>
+            </div>
+            <input type="range" id="input-glow" min="0" max="100" value="75">
+          </div>
+
+          <div class="control-group">
+            <div class="slider-header">
+              <label>Độ dày vệt sáng (Line Width):</label>
+              <span id="width-val" class="slider-val">8 px</span>
+            </div>
+            <input type="range" id="input-width" min="2" max="24" value="8">
+          </div>
+        </div>
+
+        <!-- Distance HUD Section -->
+        <div class="glass-card panel-section">
+          <div class="section-title">
+            <span class="icon-indicator amber"></span>
+            <h3>Đồng Hồ Khoảng Cách (HUD)</h3>
+          </div>
+
+          <div class="hud-toggle-row">
+            <label for="check-hud-visible">Hiển thị nhãn nhảy số:</label>
+            <input type="checkbox" id="check-hud-visible" checked>
+          </div>
+
+          <div class="hud-inputs-row">
+            <div class="input-field">
+              <label>Khoảng cách tổng:</label>
+              <input type="number" id="input-distance-val" value="285" min="1" max="9999">
+            </div>
+            <div class="input-field unit-field">
+              <label>Đơn vị:</label>
+              <select id="select-distance-unit">
+                <option value="yd" selected>Yards (yd)</option>
+                <option value="ft">Feet (ft)</option>
+                <option value="m">Meters (m)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center Video & Overlay Viewport -->
+      <div class="viewport-container">
+        <div class="viewport" id="viewport">
+          <video id="video-element" playsinline muted preload="auto"></video>
+          <canvas id="overlay-canvas"></canvas>
+
+          <!-- Interactive Handles SVG Layer -->
+          <svg id="handles-svg" class="handles-layer"></svg>
+
+          <!-- Magnifier Loupe Viewfinder -->
+          <div id="magnifier" class="magnifier hidden">
+            <canvas id="magnifier-canvas"></canvas>
+            <div class="magnifier-crosshair"></div>
+            <span id="magnifier-label" class="magnifier-label">X: 540 Y: 960</span>
+          </div>
+
+          <!-- Video Loading Overlay -->
+          <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">Đang phân tích khung hình...</p>
+          </div>
+        </div>
+
+        <!-- Timeline & Scrubbing Deck -->
+        <div class="timeline-deck glass-card">
+          <!-- Time and Frame Status Bar -->
+          <div class="deck-status">
+            <div class="status-chip">
+              <span class="chip-label">FRAME:</span>
+              <span class="chip-val highlight" id="stat-frame">0 / 120</span>
+            </div>
+            <div class="status-chip">
+              <span class="chip-label">TIME:</span>
+              <span class="chip-val" id="stat-time">00:00:00.00</span>
+            </div>
+            <div class="status-chip">
+              <span class="chip-label">SPEED:</span>
+              <select id="select-speed" class="speed-select">
+                <option value="0.25">0.25x Slo-mo</option>
+                <option value="0.5">0.5x Slow</option>
+                <option value="1.0" selected>1.0x Normal</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Scrubber Progress Bar -->
+          <div class="scrubber-wrapper">
+            <input type="range" id="scrubber-range" min="0" max="120" value="0" step="1">
+            <div class="keypoint-markers-track" id="markers-track"></div>
+          </div>
+
+          <!-- Transport Buttons -->
+          <div class="transport-controls">
+            <button id="btn-step-prev-10" class="btn-icon" title="Lùi 10 frames">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+            </button>
+            <button id="btn-step-prev" class="btn-icon" title="Lùi 1 frame (-1)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+            </button>
+            <button id="btn-play-pause" class="btn-play-large" title="Phát / Dừng">
+              <svg id="play-icon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="pause-icon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" class="hidden"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            </button>
+            <button id="btn-step-next" class="btn-icon" title="Tiến 1 frame (+1)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+            <button id="btn-step-next-10" class="btn-icon" title="Tiến 10 frames">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Export Modal -->
+  <div id="export-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3 id="export-modal-title">Đang Xuất Video HD...</h3>
+      </div>
+      <div class="modal-body">
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="export-progress-fill" style="width: 0%;"></div>
+        </div>
+        <p class="export-status-text" id="export-status-text">Đang ghép các khung hình và hiệu ứng VFX (0%)...</p>
+        <div id="export-result-preview" class="export-result hidden">
+          <video id="export-preview-video" controls autoplay loop></video>
+          <div class="export-action-buttons">
+            <a id="download-link" class="btn btn-primary glow-cyan" download="acetrace_shot.webm">
+              ⬇ Tải Video Về Máy
+            </a>
+            <button id="btn-close-modal" class="btn btn-secondary">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
