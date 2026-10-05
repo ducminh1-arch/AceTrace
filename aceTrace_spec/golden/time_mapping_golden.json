@@ -1,0 +1,62 @@
+{
+  "description": "Time to path progress mapping with gravitational ease-out ascent and ease-in descent",
+  "f_start": 120,
+  "f_apex": 165,
+  "f_landing": 230,
+  "samples": [
+    {
+      "frame": 100,
+      "progress": 0.0,
+      "u": 0.0,
+      "status": "before_start"
+    },
+    {
+      "frame": 120,
+      "progress": 0.0,
+      "u": 0.0,
+      "status": "ascending"
+    },
+    {
+      "frame": 135,
+      "progress": 0.277778,
+      "u": 0.277778,
+      "status": "ascending"
+    },
+    {
+      "frame": 150,
+      "progress": 0.444444,
+      "u": 0.444444,
+      "status": "ascending"
+    },
+    {
+      "frame": 165,
+      "progress": 0.5,
+      "u": 0.5,
+      "status": "ascending"
+    },
+    {
+      "frame": 180,
+      "progress": 0.526627,
+      "u": 0.526627,
+      "status": "descending"
+    },
+    {
+      "frame": 200,
+      "progress": 0.64497,
+      "u": 0.64497,
+      "status": "descending"
+    },
+    {
+      "frame": 230,
+      "progress": 1.0,
+      "u": 1.0,
+      "status": "descending"
+    },
+    {
+      "frame": 250,
+      "progress": 1.0,
+      "u": 1.0,
+      "status": "landed"
+    }
+  ]
+}

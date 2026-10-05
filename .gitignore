@@ -1,0 +1,34 @@
+# Root .gitignore for AceTrace
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Android
+aceTrace_android/.gradle/
+aceTrace_android/build/
+aceTrace_android/*/build/
+aceTrace_android/*.iml
+aceTrace_android/*/*.iml
+aceTrace_android/local.properties
+aceTrace_android/.idea/
+aceTrace_android/captures/
+aceTrace_android/.externalNativeBuild/
+aceTrace_android/.cxx/
+
+# iOS
+aceTrace_ios/*.xcworkspace
+aceTrace_ios/*.xcodeproj/*
+!aceTrace_ios/*.xcodeproj/project.pbxproj
+aceTrace_ios/DerivedData/
+aceTrace_ios/.build/
+aceTrace_ios/build/
+aceTrace_ios/*.ipa
+aceTrace_ios/*.xcarchive
+
+# Node / Scratch / Temp
+node_modules/
+*.log
+scratch/
+test_videos/

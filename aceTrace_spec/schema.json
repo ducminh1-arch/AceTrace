@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acetrace.app/schemas/project-v1.json",
+  "title": "AceTraceProject",
+  "description": "Shared project schema between Android (Kotlin) and iOS (Swift) for Ace Trace shot tracker.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "createdAt", "video", "trajectories", "export"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "video": {
+      "type": "object",
+      "required": ["uri", "width", "height", "rotationDegrees", "durationUs", "frameCount", "ptsUs"],
+      "properties": {
+        "uri": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "rotationDegrees": { "type": "integer", "enum": [0, 90, 180, 270] },
+        "durationUs": { "type": "integer", "minimum": 0 },
+        "frameCount": { "type": "integer", "minimum": 1 },
+        "ptsUs": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "trajectories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sport", "mode", "keypoints", "style", "distance"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "sport": { "type": "string" },
+          "mode": { "type": "string", "enum": ["bezier", "catmullRom"] },
+          "keypoints": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["role", "frameIndex", "x", "y"],
+              "properties": {
+                "role": { "type": "string", "enum": ["start", "apex", "landing", "waypoint"] },
+                "frameIndex": { "type": "integer", "minimum": 0 },
+                "x": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "y": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "handleIn": {
+                  "type": "object",
+                  "required": ["x", "y"],
+                  "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                  }
+                },
+                "handleOut": {
+                  "type": "object",
+                  "required": ["x", "y"],
+                  "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                  }
+                }
+              }
+            }
+          },
+          "style": {
+            "type": "object",
+            "required": ["palette", "gradient", "lineWidth", "glow", "trailMode", "showImpactFlash"],
+            "properties": {
+              "palette": { "type": "string" },
+              "gradient": {
+                "type": "array",
+                "minItems": 2,
+                "items": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+              },
+              "lineWidth": { "type": "number", "minimum": 1.0, "maximum": 50.0 },
+              "glow": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "trailMode": { "type": "string", "enum": ["full", "tracer", "comet"] },
+              "cometLengthFraction": { "type": "number", "minimum": 0.01, "maximum": 1.0 },
+              "showImpactFlash": { "type": "boolean" }
+            }
+          },
+          "distance": {
+            "type": "object",
+            "required": ["value", "unit", "visible", "easing"],
+            "properties": {
+              "value": { "type": "number", "minimum": 0 },
+              "unit": { "type": "string", "enum": ["ft", "m", "yd"] },
+              "visible": { "type": "boolean" },
+              "easing": { "type": "string", "enum": ["linear", "easeOut", "easeInOut"] }
+            }
+          }
+        }
+      }
+    },
+    "cameraTrack": {
+      "type": ["object", "null"],
+      "properties": {
+        "referenceFrameIndex": { "type": "integer" },
+        "transforms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["frameIndex", "matrix"],
+            "properties": {
+              "frameIndex": { "type": "integer" },
+              "matrix": {
+                "type": "array",
+                "minItems": 9,
+                "maxItems": 9,
+                "items": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "export": {
+      "type": "object",
+      "required": ["resolution", "fps", "watermark"],
+      "properties": {
+        "resolution": { "type": "string", "enum": ["source", "1080p", "720p", "4k"] },
+        "fps": { "type": "string", "enum": ["source", "30", "60"] },
+        "watermark": { "type": "boolean" }
+      }
+    }
+  }
+}
