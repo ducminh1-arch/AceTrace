@@ -33,24 +33,38 @@
       </div>
 
       <div class="top-actions">
-        <button id="btn-load-demo" class="btn btn-secondary">
-          <span class="icon">⛳</span> Demo Golf Shot
-        </button>
-        <button id="btn-load-disc" class="btn btn-secondary">
-          <span class="icon">🥏</span> Demo Disc Golf
-        </button>
-        <label class="btn btn-secondary file-upload-btn">
+        <!-- Video Presets Dropdown -->
+        <div class="preset-dropdown-wrapper">
+          <button id="btn-presets-menu" class="btn btn-secondary">
+            <span class="icon">🎬</span> <span id="current-preset-label">Golf Dọc (9:16)</span> ▾
+          </button>
+          <div id="presets-menu-dropdown" class="dropdown-menu hidden">
+            <button class="dropdown-item active" data-preset="golf-vertical">⛳ Golf Dọc (9:16)</button>
+            <button class="dropdown-item" data-preset="golf-horizontal">⛳ Golf Ngang (16:9)</button>
+            <button class="dropdown-item" data-preset="disc-vertical">🥏 Disc Golf Dọc (9:16)</button>
+            <button class="dropdown-item" data-preset="disc-horizontal">🥏 Disc Golf Ngang (16:9)</button>
+          </div>
+        </div>
+
+        <label class="btn btn-secondary file-upload-btn" title="Mở file video từ máy tính của bạn">
           <span class="icon">📁</span> Chọn Video Máy
           <input type="file" id="video-file-input" accept="video/*" hidden>
         </label>
-        <button id="btn-save-project" class="btn btn-secondary">
+        
+        <button id="btn-save-project" class="btn btn-secondary" title="Lưu cấu trúc Project JSON chuẩn schemaVersion 1">
           <span class="icon">💾</span> Lưu JSON
         </button>
-        <label class="btn btn-secondary file-upload-btn">
+        
+        <label class="btn btn-secondary file-upload-btn" title="Mở file Project JSON">
           <span class="icon">📂</span> Mở JSON
           <input type="file" id="json-file-input" accept=".json" hidden>
         </label>
-        <button id="btn-export-video" class="btn btn-primary glow-cyan">
+
+        <button id="btn-export-golden" class="btn btn-secondary" title="Xuất bộ Golden Test Vectors (Bezier & Catmull-Rom)">
+          <span class="icon">📊</span> Xuất Golden Vectors
+        </button>
+
+        <button id="btn-export-video" class="btn btn-primary glow-cyan" title="Render video HD giữ nguyên tỷ lệ">
           <span class="icon">⚡</span> Xuất Video HD
         </button>
       </div>
@@ -66,7 +80,7 @@
             <span class="icon-indicator cyan"></span>
             <h3>Điểm Neo Quỹ Đạo</h3>
           </div>
-          <p class="section-desc">Chọn điểm rồi click/chạm lên video để đặt vị trí bóng.</p>
+          <p class="section-desc">Click chọn điểm rồi click trên video để đặt vị trí. Tọa độ tự động chuẩn hóa [0..1] theo Video Content Rect.</p>
 
           <div class="keypoint-selector">
             <button class="kp-btn active" data-role="start" id="kp-start-btn">
@@ -80,7 +94,7 @@
               <span class="dot apex-dot"></span>
               <div class="kp-info">
                 <span class="kp-name">2. Apex (Đỉnh cao)</span>
-                <span class="kp-coord" id="coord-apex">Frame: 65</span>
+                <span class="kp-coord" id="coord-apex">Frame: 68</span>
               </div>
             </button>
             <button class="kp-btn" data-role="landing" id="kp-landing-btn">
@@ -112,11 +126,11 @@
           <div class="control-group">
             <label>Bảng màu Preset:</label>
             <div class="palette-grid">
-              <button class="palette-swatch active" data-palette="neonCyan" style="background: linear-gradient(135deg, #00E5FF, #FF2D95, #FFB300);"></button>
-              <button class="palette-swatch" data-palette="electricSunset" style="background: linear-gradient(135deg, #FF0055, #FF5500, #FFAA00);"></button>
-              <button class="palette-swatch" data-palette="acidGreen" style="background: linear-gradient(135deg, #00FF66, #00E5FF, #0088FF);"></button>
-              <button class="palette-swatch" data-palette="cyberPurple" style="background: linear-gradient(135deg, #B500FF, #FF0077, #00FFFF);"></button>
-              <button class="palette-swatch" data-palette="iceFire" style="background: linear-gradient(135deg, #FFFFFF, #00E5FF, #0044FF);"></button>
+              <button class="palette-swatch active" data-palette="neonCyan" style="background: linear-gradient(135deg, #00E5FF, #FF2D95, #FFB300);" title="Neon Cyan"></button>
+              <button class="palette-swatch" data-palette="electricSunset" style="background: linear-gradient(135deg, #FF0055, #FF5500, #FFAA00);" title="Electric Sunset"></button>
+              <button class="palette-swatch" data-palette="acidGreen" style="background: linear-gradient(135deg, #00FF66, #00E5FF, #0088FF);" title="Acid Green"></button>
+              <button class="palette-swatch" data-palette="cyberPurple" style="background: linear-gradient(135deg, #B500FF, #FF0077, #00FFFF);" title="Cyber Purple"></button>
+              <button class="palette-swatch" data-palette="iceFire" style="background: linear-gradient(135deg, #FFFFFF, #00E5FF, #0044FF);" title="Ice Fire"></button>
             </div>
           </div>
 
@@ -180,7 +194,7 @@
       <!-- Center Video & Overlay Viewport -->
       <div class="viewport-container">
         <div class="viewport" id="viewport">
-          <video id="video-element" playsinline muted preload="auto"></video>
+          <video id="video-element" playsinline muted preload="auto" class="hidden"></video>
           <canvas id="overlay-canvas"></canvas>
 
           <!-- Interactive Handles SVG Layer -->
@@ -213,6 +227,10 @@
               <span class="chip-val" id="stat-time">00:00:00.00</span>
             </div>
             <div class="status-chip">
+              <span class="chip-label">CONTENT RECT:</span>
+              <span class="chip-val" id="stat-rect" style="color:#00E5FF; font-size:11px;">1080x1920</span>
+            </div>
+            <div class="status-chip">
               <span class="chip-label">SPEED:</span>
               <select id="select-speed" class="speed-select">
                 <option value="0.25">0.25x Slo-mo</option>
@@ -224,7 +242,7 @@
 
           <!-- Scrubber Progress Bar -->
           <div class="scrubber-wrapper">
-            <input type="range" id="scrubber-range" min="0" max="120" value="0" step="1">
+            <input type="range" id="scrubber-range" min="0" max="119" value="0" step="1">
             <div class="keypoint-markers-track" id="markers-track"></div>
           </div>
 
