@@ -21,9 +21,15 @@ public class PlayerController: ObservableObject {
 
     public func loadVideo(metadata: VideoMetadata) {
         self.metadata = metadata
-        guard let url = URL(string: metadata.uri) else { return }
+        let url: URL? = {
+            if let u = URL(string: metadata.uri), u.scheme != nil {
+                return u
+            }
+            return URL(fileURLWithPath: metadata.uri)
+        }()
+        guard let validURL = url else { return }
 
-        let item = AVPlayerItem(url: url)
+        let item = AVPlayerItem(url: validURL)
         player.replaceCurrentItem(with: item)
 
         state.totalFrames = metadata.frameCount

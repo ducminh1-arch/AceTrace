@@ -193,3 +193,49 @@ public struct Project: Codable, Equatable, Identifiable {
         self.export = export
     }
 }
+
+extension Project {
+    public static func createDemoProject(orientation: String = "vertical") -> Project {
+        let isVert = orientation == "vertical"
+        let demoPts = (0...120).map { Int64($0 * 33333) }
+        return Project(
+            video: VideoMetadata(
+                uri: "demo",
+                width: isVert ? 1080 : 1920,
+                height: isVert ? 1920 : 1080,
+                rotationDegrees: 0,
+                durationUs: 4_000_000,
+                frameCount: 120,
+                ptsUs: demoPts
+            ),
+            trajectories: [
+                Trajectory(
+                    sport: "golf",
+                    mode: "bezier",
+                    keypoints: isVert ? [
+                        Keypoint(role: "start", frameIndex: 48, x: 0.46, y: 0.77),
+                        Keypoint(role: "apex", frameIndex: 78, x: 0.58, y: 0.18),
+                        Keypoint(role: "landing", frameIndex: 112, x: 0.58, y: 0.52)
+                    ] : [
+                        Keypoint(role: "start", frameIndex: 48, x: 0.32, y: 0.82),
+                        Keypoint(role: "apex", frameIndex: 78, x: 0.52, y: 0.22),
+                        Keypoint(role: "landing", frameIndex: 112, x: 0.74, y: 0.65)
+                    ],
+                    style: TrajectoryStyle(
+                        palette: "aurora",
+                        gradient: ["#00E5FF", "#FF2D95", "#FFB300"],
+                        lineWidth: 11.0,
+                        glow: 0.85,
+                        trailMode: "tracer"
+                    ),
+                    distance: DistanceConfig(
+                        value: 450.0,
+                        unit: "ft",
+                        visible: true,
+                        easing: "easeOut"
+                    )
+                )
+            ]
+        )
+    }
+}

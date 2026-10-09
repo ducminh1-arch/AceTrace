@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.RectF
 import com.acetrace.app.core.curve.BezierPath
 import com.acetrace.app.core.curve.CatmullRomPath
 import com.acetrace.app.core.curve.FlightStatus
@@ -29,15 +30,16 @@ object OverlayRenderer {
         project: Project,
         canvas: Canvas,
         canvasWidth: Float,
-        canvasHeight: Float
+        canvasHeight: Float,
+        contentRect: RectF = RectF(0f, 0f, canvasWidth, canvasHeight)
     ) {
         for (trajectory in project.trajectories) {
-            renderTrajectory(frameIndex, trajectory, canvas, canvasWidth, canvasHeight)
+            renderTrajectory(frameIndex, trajectory, canvas, contentRect)
         }
 
         // Render Watermark if required by export config
         if (project.export.watermark) {
-            renderWatermark(canvas, canvasWidth, canvasHeight)
+            renderWatermark(canvas, contentRect)
         }
     }
 
@@ -45,8 +47,7 @@ object OverlayRenderer {
         frameIndex: Int,
         trajectory: Trajectory,
         canvas: Canvas,
-        width: Float,
-        height: Float
+        contentRect: RectF
     ) {
         val keypoints = trajectory.keypoints
         if (keypoints.size < 2) return
@@ -85,10 +86,14 @@ object OverlayRenderer {
         val numSamples = 60
         val samplePoints = mutableListOf<Point2D>()
         val step = (uEnd - uStart) / numSamples.coerceAtLeast(1)
+        val rx = contentRect.left
+        val ry = contentRect.top
+        val rw = contentRect.width()
+        val rh = contentRect.height()
         for (i in 0..numSamples) {
             val u = (uStart + i * step).coerceIn(0f, 1f)
             val pt = path.point(u)
-            samplePoints.add(Point2D(pt.x * width, pt.y * height))
+            samplePoints.add(Point2D(rx + pt.x * rw, ry + pt.y * rh))
         }
 
         if (samplePoints.size < 2) return
@@ -169,17 +174,108 @@ object OverlayRenderer {
             canvas.drawCircle(startPx.x, startPx.y, baseLineWidth * 2.5f, flashPaint)
         }
 
-        // 5. Dynamic Distance HUD label
-        if (trajectory.distance.visible) {
+        // 4b. Leading Edge Golf Ball Head Glow
+        val headPt = samplePoints.last()
+        val ballGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            if (baseLineWidth > 2f) {
+                maskFilter = BlurMaskFilter(baseLineWidth * 0.7f, BlurMaskFilter.Blur.SOLID)
+            }
+        }
+        canvas.drawCircle(headPt.x, headPt.y, baseLineWidth * 0.9f, ballGlowPaint)
+
+        // 4c. Wave / Ribbon effect along trajectory (matching reference screenshots)
+        if (trajStyle.effectMode == "wave" && samplePoints.size >= 2) {
+            val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#B0FF2D95")
+                style = Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeWidth = baseLineWidth * 0.8f
+                maskFilter = BlurMaskFilter(baseLineWidth * 1.5f, BlurMaskFilter.Blur.NORMAL)
+            }
+            val wavePath = Path()
+            for (i in samplePoints.indices) {
+                val pt = samplePoints[i]
+                val waveOffset = kotlin.math.sin(i * 0.65f + frameIndex * 0.25f) * (baseLineWidth * 2.2f)
+                val wx = (pt.x + waveOffset).toFloat()
+                val wy = (pt.y + (waveOffset * 0.35f)).toFloat()
+                if (i == 0) wavePath.moveTo(wx, wy) else wavePath.lineTo(wx, wy)
+            }
+            canvas.drawPath(wavePath, wavePaint)
+        }
+
+        // 5. Dynamic Distance HUD label (above ball) - Only if NOT showing Hero Overlay
+        if (trajectory.distance.visible && !trajectory.distance.showHeroOverlay) {
             renderDistanceLabel(
                 flightState.progress,
                 trajectory.distance.value,
                 trajectory.distance.unit,
                 trajectory.distance.easing,
                 samplePoints.last(),
-                canvas
+                canvas,
+                contentRect
             )
         }
+
+        // 6. Hero Large Distance Display on Video (matching reference screenshot 1 "450ft")
+        if (trajectory.distance.visible && trajectory.distance.showHeroOverlay) {
+            renderHeroDistanceOverlay(
+                flightState.progress,
+                trajectory.distance.value,
+                trajectory.distance.unit,
+                trajectory.distance.easing,
+                canvas,
+                contentRect,
+                trajStyle.gradient.getOrNull(1) ?: "#FF2D95"
+            )
+        }
+    }
+
+    private fun renderHeroDistanceOverlay(
+        progress: Float,
+        totalDistance: Float,
+        unit: String,
+        easing: String,
+        canvas: Canvas,
+        contentRect: RectF,
+        accentColorHex: String
+    ) {
+        val currentDist = TimeMapping.computeDistance(totalDistance, progress, easing)
+        val heroText = "${currentDist.roundToInt()}$unit"
+
+        val heroFontSize = (contentRect.height() * 0.085f).coerceIn(42f, 76f)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = heroFontSize
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setShadowLayer(12f, 0f, 4f, Color.parseColor("#B3000000"))
+        }
+
+        val textWidth = textPaint.measureText(heroText)
+        val posX = contentRect.left + 44f
+        val posY = contentRect.top + heroFontSize * 1.6f
+
+        canvas.drawText(heroText, posX, posY, textPaint)
+
+        // Underline luminous accent streak (matching Screenshot 1)
+        val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = parseColorSafe(accentColorHex)
+            style = Paint.Style.STROKE
+            strokeWidth = (heroFontSize * 0.10f).coerceIn(4.5f, 9f)
+            strokeCap = Paint.Cap.ROUND
+            maskFilter = BlurMaskFilter(6f, BlurMaskFilter.Blur.SOLID)
+        }
+        val streakPath = Path().apply {
+            val startY = posY + 14f
+            moveTo(posX - 4f, startY)
+            cubicTo(
+                posX + textWidth * 0.35f, startY + 14f,
+                posX + textWidth * 0.70f, startY + 10f,
+                posX + textWidth * 1.15f, startY - 2f
+            )
+        }
+        canvas.drawPath(streakPath, streakPaint)
     }
 
     private fun renderDistanceLabel(
@@ -188,36 +284,43 @@ object OverlayRenderer {
         unit: String,
         easing: String,
         headPoint: Point2D,
-        canvas: Canvas
+        canvas: Canvas,
+        contentRect: RectF
     ) {
         val currentDist = TimeMapping.computeDistance(totalDistance, progress, easing)
         val labelText = "${currentDist.roundToInt()} $unit"
 
+        val labelFontSize = (contentRect.height() * 0.045f).coerceIn(16f, 36f)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 28f
+            textSize = labelFontSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
 
         val textWidth = textPaint.measureText(labelText)
-        val textHeight = 24f
-        val padding = 12f
+        val textHeight = labelFontSize * 0.85f
+        val padding = labelFontSize * 0.45f
 
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#CC12121A")
+            color = Color.parseColor("#E612121A")
             style = Paint.Style.FILL
         }
 
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#6600E5FF")
+            color = Color.parseColor("#8000E5FF")
             style = Paint.Style.STROKE
-            strokeWidth = 2f
+            strokeWidth = 2.5f
         }
 
-        // Offset -32px above head point
-        val centerX = headPoint.x
-        val centerY = headPoint.y - 36f
+        // Clamped within contentRect
+        val minX = contentRect.left + textWidth / 2f + padding
+        val maxX = contentRect.right - textWidth / 2f - padding
+        val centerX = if (minX < maxX) headPoint.x.coerceIn(minX, maxX) else (contentRect.left + contentRect.right) / 2f
+        val centerY = (headPoint.y - labelFontSize * 1.3f).coerceIn(
+            contentRect.top + textHeight + padding,
+            contentRect.bottom - padding
+        )
 
         val rectLeft = centerX - textWidth / 2f - padding
         val rectTop = centerY - textHeight / 2f - padding
@@ -229,15 +332,16 @@ object OverlayRenderer {
         canvas.drawText(labelText, centerX, centerY + textHeight / 3f, textPaint)
     }
 
-    private fun renderWatermark(canvas: Canvas, width: Float, height: Float) {
+    private fun renderWatermark(canvas: Canvas, contentRect: RectF) {
+        val fontSize = (contentRect.height() * 0.022f).coerceIn(14f, 32f)
         val watermarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             alpha = 140
-            textSize = 24f
+            textSize = fontSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.RIGHT
         }
-        canvas.drawText("Traced with AceTrace", width - 30f, height - 30f, watermarkPaint)
+        canvas.drawText("Traced with AceTrace", contentRect.right - 20f, contentRect.bottom - 20f, watermarkPaint)
     }
 
     private fun parseColorSafe(hex: String): Int {

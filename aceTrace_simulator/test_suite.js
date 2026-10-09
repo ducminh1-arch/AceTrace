@@ -157,4 +157,53 @@ if (reParsed.schemaVersion === 1 && reParsed.trajectories[0].keypoints[1].handle
   console.error("-> FAIL: JSON structure invalid!");
 }
 
+// 5. Test Catmull-Rom Trajectory Exact Keypoint Interpolation
+console.log("\n=== 5. Testing Catmull-Rom Trajectory Interpolation ===");
+function clamp01(v) { return Math.min(Math.max(v, 0), 1); }
+function evaluateCatmullRom(p0, p1, p2, p3, t, alpha = 0.5) {
+  function distSq(a, b) { return (a.x - b.x) ** 2 + (a.y - b.y) ** 2; }
+  const t0 = 0.0;
+  const t1 = t0 + Math.max(Math.pow(distSq(p0, p1), alpha * 0.5), 1e-4);
+  const t2 = t1 + Math.max(Math.pow(distSq(p1, p2), alpha * 0.5), 1e-4);
+  const t3 = t2 + Math.max(Math.pow(distSq(p2, p3), alpha * 0.5), 1e-4);
+  const actualT = t1 + clamp01(t) * (t2 - t1);
+  function interp(a, b, ta, tb, tVal) {
+    const factor = (tVal - ta) / (tb - ta);
+    return { x: a.x + factor * (b.x - a.x), y: a.y + factor * (b.y - a.y) };
+  }
+  const a1 = interp(p0, p1, t0, t1, actualT);
+  const a2 = interp(p1, p2, t1, t2, actualT);
+  const a3 = interp(p2, p3, t2, t3, actualT);
+  const b1 = interp(a1, a2, t0, t2, actualT);
+  const b2 = interp(a2, a3, t1, t3, actualT);
+  return interp(b1, b2, t1, t2, actualT);
+}
+function evaluateCatmullRomTrajectory(kps, u) {
+  const pStart = kps[0], pApex = kps[1], pLanding = kps[2];
+  if (u <= 0.5) {
+    return evaluateCatmullRom(pStart, pStart, pApex, pLanding, u / 0.5);
+  } else {
+    return evaluateCatmullRom(pStart, pApex, pLanding, pLanding, (u - 0.5) / 0.5);
+  }
+}
+const kps = [
+  { x: 0.42, y: 0.78 },
+  { x: 0.55, y: 0.22 },
+  { x: 0.72, y: 0.65 }
+];
+const ptStart = evaluateCatmullRomTrajectory(kps, 0.0);
+const ptApex = evaluateCatmullRomTrajectory(kps, 0.5);
+const ptLanding = evaluateCatmullRomTrajectory(kps, 1.0);
+console.log("Catmull-Rom u=0.0 (Start):", ptStart);
+console.log("Catmull-Rom u=0.5 (Apex):", ptApex);
+console.log("Catmull-Rom u=1.0 (Landing):", ptLanding);
+if (Math.abs(ptStart.x - 0.42) < 1e-4 && Math.abs(ptStart.y - 0.78) < 1e-4 &&
+    Math.abs(ptApex.x - 0.55) < 1e-4 && Math.abs(ptApex.y - 0.22) < 1e-4 &&
+    Math.abs(ptLanding.x - 0.72) < 1e-4 && Math.abs(ptLanding.y - 0.65) < 1e-4) {
+  console.log("-> PASS: Catmull-Rom trajectory accurately interpolates Start, Apex, and Landing points!");
+} else {
+  console.error("-> FAIL: Catmull-Rom trajectory endpoint interpolation failed!");
+}
+
 console.log("\nALL VERIFICATION TESTS COMPLETED SUCCESSFULLY!");
+

@@ -37,7 +37,9 @@ data class TrajectoryStyle(
     val glow: Float = 0.7f,
     val trailMode: String = "tracer", // "full", "tracer", "comet"
     val cometLengthFraction: Float = 0.25f,
-    val showImpactFlash: Boolean = true
+    val showImpactFlash: Boolean = true,
+    val effectMode: String = "standard", // "standard", "wave", "sparkle"
+    val is3D: Boolean = true
 )
 
 @Serializable
@@ -45,7 +47,8 @@ data class DistanceConfig(
     val value: Float = 250f,
     val unit: String = "yd", // "yd", "ft", "m"
     val visible: Boolean = true,
-    val easing: String = "easeOut"
+    val easing: String = "easeOut",
+    val showHeroOverlay: Boolean = true // Large "450ft" on video as seen in reference screenshots
 )
 
 @Serializable

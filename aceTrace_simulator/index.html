@@ -46,6 +46,11 @@
           </div>
         </div>
 
+        <label class="btn btn-secondary debug-btn" title="Hiển thị viền đỏ bao quanh Video Rect">
+          <input type="checkbox" id="check-debug" checked style="accent-color: #FF3B30; cursor: pointer;">
+          <span class="icon" style="color: #FF3B30;">🎯</span> Debug Rect
+        </label>
+
         <label class="btn btn-secondary file-upload-btn" title="Mở file video từ máy tính của bạn">
           <span class="icon">📁</span> Chọn Video Máy
           <input type="file" id="video-file-input" accept="video/*" hidden>
@@ -72,8 +77,8 @@
 
     <!-- Main Workspace -->
     <main class="workspace">
-      <!-- Left / Side Panel: Keypoints & Styles -->
-      <aside class="sidebar">
+      <!-- Left / Side Panel: Keypoints & Styles (Collapsible) -->
+      <aside class="sidebar" id="sidebar">
         <!-- Keypoints Section -->
         <div class="glass-card panel-section">
           <div class="section-title">
@@ -119,7 +124,7 @@
         <div class="glass-card panel-section">
           <div class="section-title">
             <span class="icon-indicator pink"></span>
-            <h3>Hiệu Ứng Neon VFX</h3>
+            <h3>Hiệu Ứng Ruy-Băng Neon VFX</h3>
           </div>
 
           <!-- Color Palettes -->
@@ -140,7 +145,7 @@
             <div class="trail-mode-grid">
               <button class="mode-pill active" data-trail="tracer">Tracer (Chạy theo bóng)</button>
               <button class="mode-pill" data-trail="full">Full (Toàn bộ đường)</button>
-              <button class="mode-pill" data-trail="comet">Comet (Đuôi sao băng)</button>
+              <button class="mode-pill" data-trail="comet">Comet (Đuôi thuôn nhọn)</button>
             </div>
           </div>
 
@@ -155,10 +160,18 @@
 
           <div class="control-group">
             <div class="slider-header">
-              <label>Độ dày vệt sáng (Line Width):</label>
-              <span id="width-val" class="slider-val">8 px</span>
+              <label>Độ dày dải ruy-băng (Width):</label>
+              <span id="width-val" class="slider-val">12 px</span>
             </div>
-            <input type="range" id="input-width" min="2" max="24" value="8">
+            <input type="range" id="input-width" min="4" max="32" value="12">
+          </div>
+
+          <div class="control-group">
+            <div class="slider-header">
+              <label>Độ thon đuôi (Taper):</label>
+              <span id="taper-val" class="slider-val">40%</span>
+            </div>
+            <input type="range" id="input-taper" min="0" max="100" value="40">
           </div>
         </div>
 
@@ -191,79 +204,112 @@
         </div>
       </aside>
 
-      <!-- Center Video & Overlay Viewport -->
+      <!-- Sidebar Collapse / Expand Toggle Button -->
+      <button id="btn-toggle-sidebar" class="sidebar-toggle-btn" title="Thu gọn / Mở rộng bảng điều khiển">
+        <span id="toggle-icon">◀</span>
+      </button>
+
+      <!-- Center Video & Overlay Viewport (wrapped in Phone Frame) -->
       <div class="viewport-container">
-        <div class="viewport" id="viewport">
-          <video id="video-element" playsinline muted preload="auto" class="hidden"></video>
-          <canvas id="overlay-canvas"></canvas>
+        <div class="phone-mockup-wrapper">
+          <div class="phone-frame" id="phone-frame">
+            <!-- Dynamic Island / Top Speaker -->
+            <div class="phone-island">
+              <div class="island-camera"></div>
+            </div>
 
-          <!-- Interactive Handles SVG Layer -->
-          <svg id="handles-svg" class="handles-layer"></svg>
+            <!-- Viewport Screen -->
+            <div class="viewport" id="viewport">
+              <button id="btn-viewport-close" class="btn-viewport-close" title="Đóng">✕</button>
+              <video id="video-element" playsinline muted preload="auto" class="hidden"></video>
+              <canvas id="overlay-canvas"></canvas>
 
-          <!-- Magnifier Loupe Viewfinder -->
-          <div id="magnifier" class="magnifier hidden">
-            <canvas id="magnifier-canvas"></canvas>
-            <div class="magnifier-crosshair"></div>
-            <span id="magnifier-label" class="magnifier-label">X: 540 Y: 960</span>
-          </div>
+              <!-- Interactive Handles SVG Layer -->
+              <svg id="handles-svg" class="handles-layer"></svg>
 
-          <!-- Video Loading Overlay -->
-          <div id="loading-overlay" class="loading-overlay hidden">
-            <div class="spinner"></div>
-            <p id="loading-text">Đang phân tích khung hình...</p>
+              <!-- Magnifier Loupe Viewfinder -->
+              <div id="magnifier" class="magnifier hidden">
+                <canvas id="magnifier-canvas"></canvas>
+                <div class="magnifier-crosshair"></div>
+                <span id="magnifier-label" class="magnifier-label">X: 540 Y: 960</span>
+              </div>
+
+              <!-- Video Loading Overlay -->
+              <div id="loading-overlay" class="loading-overlay hidden">
+                <div class="spinner"></div>
+                <p id="loading-text">Đang phân tích khung hình...</p>
+              </div>
+            </div>
+
+            <!-- Phone Bottom Mobile Toolbar -->
+            <div class="mobile-phone-toolbar">
+              <!-- Color Dots Swatch Row -->
+              <div class="mobile-color-dots">
+                <button class="mobile-dot active" data-palette="neonCyan" style="background: linear-gradient(135deg, #00E5FF, #FF2D95, #FFB300);" title="Neon Cyan"></button>
+                <button class="mobile-dot" data-palette="electricSunset" style="background: linear-gradient(135deg, #FF0055, #FF5500, #FFAA00);" title="Electric Sunset"></button>
+                <button class="mobile-dot" data-palette="acidGreen" style="background: linear-gradient(135deg, #00FF66, #00E5FF, #0088FF);" title="Acid Green"></button>
+                <button class="mobile-dot" data-palette="cyberPurple" style="background: linear-gradient(135deg, #B500FF, #FF0077, #00FFFF);" title="Cyber Purple"></button>
+                <button class="mobile-dot" data-palette="iceFire" style="background: linear-gradient(135deg, #FFFFFF, #00E5FF, #0044FF);" title="Ice Fire"></button>
+              </div>
+
+              <!-- Tab Bar: Back | Style | Settings | Text | Effects | Render -->
+              <div class="mobile-tabs-row">
+                <button class="mobile-tab-btn" data-tab="back"><span class="tab-icon">↩</span><span class="tab-label">Back</span></button>
+                <button class="mobile-tab-btn active" data-tab="style"><span class="tab-icon">🎨</span><span class="tab-label">Style</span></button>
+                <button class="mobile-tab-btn" data-tab="settings"><span class="tab-icon">⚙️</span><span class="tab-label">Settings</span></button>
+                <button class="mobile-tab-btn" data-tab="text"><span class="tab-icon">🔤</span><span class="tab-label">Text</span></button>
+                <button class="mobile-tab-btn" data-tab="effects"><span class="tab-icon">✨</span><span class="tab-label">Effects</span></button>
+                <button class="mobile-tab-btn" data-tab="render"><span class="tab-icon">🚀</span><span class="tab-label">Render</span></button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Timeline & Scrubbing Deck -->
-        <div class="timeline-deck glass-card">
-          <!-- Time and Frame Status Bar -->
-          <div class="deck-status">
-            <div class="status-chip">
-              <span class="chip-label">FRAME:</span>
-              <span class="chip-val highlight" id="stat-frame">0 / 120</span>
-            </div>
-            <div class="status-chip">
-              <span class="chip-label">TIME:</span>
-              <span class="chip-val" id="stat-time">00:00:00.00</span>
-            </div>
-            <div class="status-chip">
-              <span class="chip-label">CONTENT RECT:</span>
-              <span class="chip-val" id="stat-rect" style="color:#00E5FF; font-size:11px;">1080x1920</span>
-            </div>
-            <div class="status-chip">
-              <span class="chip-label">SPEED:</span>
-              <select id="select-speed" class="speed-select">
-                <option value="0.25">0.25x Slo-mo</option>
-                <option value="0.5">0.5x Slow</option>
-                <option value="1.0" selected>1.0x Normal</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Scrubber Progress Bar -->
+        <!-- Timeline & Scrubbing Deck (Compact Single-Row Layout) -->
+        <div class="timeline-deck" id="timeline-deck">
+          <!-- Scrubber Progress Bar on top -->
           <div class="scrubber-wrapper">
             <input type="range" id="scrubber-range" min="0" max="119" value="0" step="1">
             <div class="keypoint-markers-track" id="markers-track"></div>
           </div>
 
-          <!-- Transport Buttons -->
-          <div class="transport-controls">
-            <button id="btn-step-prev-10" class="btn-icon" title="Lùi 10 frames">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
-            </button>
-            <button id="btn-step-prev" class="btn-icon" title="Lùi 1 frame (-1)">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-            </button>
-            <button id="btn-play-pause" class="btn-play-large" title="Phát / Dừng">
-              <svg id="play-icon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              <svg id="pause-icon" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" class="hidden"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-            </button>
-            <button id="btn-step-next" class="btn-icon" title="Tiến 1 frame (+1)">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-            </button>
-            <button id="btn-step-next-10" class="btn-icon" title="Tiến 10 frames">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
-            </button>
+          <!-- Bottom single row: FRAME/TIME left, Controls center, SPEED right -->
+          <div class="deck-bottom-row">
+            <div class="deck-left-stats">
+              <span class="chip-label">F:</span>
+              <span class="chip-val highlight" id="stat-frame">0/120</span>
+              <span class="chip-label">T:</span>
+              <span class="chip-val" id="stat-time">00:00.00</span>
+              <span class="chip-val rect-pill" id="stat-rect" title="Source vs Hiển thị">1080x1920</span>
+            </div>
+
+            <div class="transport-controls">
+              <button id="btn-step-prev-10" class="btn-icon-compact" title="Lùi 10 frames">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/></svg>
+              </button>
+              <button id="btn-step-prev" class="btn-icon-compact" title="Lùi 1 frame (-1)">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+              </button>
+              <button id="btn-play-pause" class="btn-play-compact" title="Phát / Dừng">
+                <svg id="play-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                <svg id="pause-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" class="hidden"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              </button>
+              <button id="btn-step-next" class="btn-icon-compact" title="Tiến 1 frame (+1)">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+              </button>
+              <button id="btn-step-next-10" class="btn-icon-compact" title="Tiến 10 frames">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/></svg>
+              </button>
+            </div>
+
+            <div class="deck-right-controls">
+              <span class="chip-label">SPD:</span>
+              <select id="select-speed" class="speed-select-compact">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="1.0" selected>1.0x</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>

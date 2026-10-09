@@ -1,0 +1,33 @@
+name: Build iOS Simulator App for Appetize
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-simulator:
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build for iOS Simulator
+        run: |
+          cd aceTrace_ios
+          xcodebuild build \
+            -project AceTrace.xcodeproj \
+            -scheme AceTrace \
+            -destination "generic/platform=iOS Simulator" \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+          cd build/Build/Products/Debug-iphonesimulator
+          zip -r AceTrace.app.zip AceTrace.app
+
+      - name: Upload Simulator App for Appetize
+        uses: actions/upload-artifact@v4
+        with:
+          name: AceTrace-iOS-Simulator
+          path: aceTrace_ios/build/Build/Products/Debug-iphonesimulator/AceTrace.app.zip

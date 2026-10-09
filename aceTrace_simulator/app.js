@@ -34,7 +34,8 @@ const state = {
         style: {
           palette: "neonCyan",
           gradient: ["#00E5FF", "#FF2D95", "#FFB300"],
-          lineWidth: 8,
+          lineWidth: 12,
+          taper: 0.40,
           glow: 0.75,
           trailMode: "tracer",
           cometLengthFraction: 0.25,
@@ -56,8 +57,9 @@ const state = {
     }
   },
 
-  // Video Content Rect inside viewport (container px, letterbox/pillarbox accounted for)
+  // Authoritative Video Rect inside viewport (container px, letterbox/pillarbox accounted for)
   videoContentRect: { x: 0, y: 0, w: 1080, h: 1920 },
+  debugRect: true,
 
   // Playback & UI State
   currentFrame: 0,
@@ -106,42 +108,53 @@ let demoCtx = demoCanvas.getContext("2d");
 let demoStream = null;
 let isUsingUserVideo = false;
 
+// Preload realistic golf background images matching official Ace Trace App Store app
+const demoBgVertical = new Image();
+demoBgVertical.src = "assets/golf_vertical.jpg";
+demoBgVertical.onload = () => { renderCurrentFrame(); };
+
+const demoBgHorizontal = new Image();
+demoBgHorizontal.src = "assets/golf_horizontal.jpg";
+demoBgHorizontal.onload = () => { renderCurrentFrame(); };
+
 // ==========================================
-// 1. VIDEO CONTENT RECT & COORDINATE ENGINE
+// 1. VIDEO RECT & COORDINATE ENGINE (Requirement A)
 // ==========================================
 
 /**
- * Computes the exact rectangle where the video is displayed inside container (after letterbox/pillarbox)
+ * ONLY ONE function to compute videoRect = {x, y, w, h} (pixel in container).
+ * Fits video into container preserving exact aspect ratio AFTER rotation.
+ * 
+ * Formula:
+ * scale = Math.min(containerW / videoW, containerH / videoH);
+ * w = Math.round(videoW * scale);
+ * h = Math.round(videoH * scale);
+ * x = Math.round((containerW - w) / 2);
+ * y = Math.round((containerH - h) / 2);
  */
-function computeVideoContentRect(containerW, containerH, videoW, videoH) {
+function computeVideoRect(containerW, containerH, videoW, videoH, rotationDegrees = 0) {
   if (!videoW || !videoH || !containerW || !containerH) {
-    return { x: 0, y: 0, w: containerW, h: containerH };
+    return { x: 0, y: 0, w: containerW || 0, h: containerH || 0, scale: 1 };
   }
-  const videoAspect = videoW / videoH;
-  const containerAspect = containerW / containerH;
-
-  let w, h, x, y;
-  if (containerAspect > videoAspect) {
-    // Container is wider than video -> pillarbox (black bars left and right)
-    h = containerH;
-    w = containerH * videoAspect;
-    x = (containerW - w) / 2;
-    y = 0;
-  } else {
-    // Container is taller than video -> letterbox (black bars top and bottom)
-    w = containerW;
-    h = containerW / videoAspect;
-    x = 0;
-    y = (containerH - h) / 2;
+  // Video dimensions after rotation (e.g. 90 or 270 degrees swaps width and height)
+  let vW = videoW;
+  let vH = videoH;
+  if (rotationDegrees === 90 || rotationDegrees === 270) {
+    vW = videoH;
+    vH = videoW;
   }
 
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    w: Math.round(w),
-    h: Math.round(h)
-  };
+  const scale = Math.min(containerW / vW, containerH / vH);
+  const w = Math.round(vW * scale);
+  const h = Math.round(vH * scale);
+  const x = Math.round((containerW - w) / 2);
+  const y = Math.round((containerH - h) / 2);
+
+  return { x, y, w, h, scale, vW, vH };
 }
+
+// Canonical alias ensuring 100% interoperability
+const computeVideoContentRect = computeVideoRect;
 
 function clamp01(val) {
   return Math.min(Math.max(val, 0.0), 1.0);
@@ -259,6 +272,19 @@ function evaluateCatmullRom(p0, p1, p2, p3, t, alpha = 0.5) {
   return interp(b1, b2, t1, t2, actualT);
 }
 
+function evaluateCatmullRomTrajectory(resolvedKps, u) {
+  const pStart = resolvedKps[0];
+  const pApex = resolvedKps[1];
+  const pLanding = resolvedKps[2];
+  if (u <= 0.5) {
+    const t = u / 0.5;
+    return evaluateCatmullRom(pStart, pStart, pApex, pLanding, t);
+  } else {
+    const t = (u - 0.5) / 0.5;
+    return evaluateCatmullRom(pStart, pApex, pLanding, pLanding, t);
+  }
+}
+
 /**
  * Time Mapping with gravitational easing:
  * Ascent (Start -> Apex): Quadratic Ease-Out (decelerating against gravity)
@@ -346,7 +372,7 @@ function renderOverlay(ctx, project, frameIndex, rect) {
     if (uEnd <= uStart && currentU > 0) continue;
 
     const resolvedKps = resolveKeypointHandles(keypoints);
-    const numSamples = 60;
+    const numSamples = 100;
     const points = [];
     const step = (uEnd - uStart) / Math.max(numSamples, 1);
 
@@ -354,10 +380,7 @@ function renderOverlay(ctx, project, frameIndex, rect) {
       const u = clamp01(uStart + i * step);
       let pt;
       if (trajectory.mode === "catmullRom") {
-        pt = evaluateCatmullRom(
-          resolvedKps[0], resolvedKps[0], resolvedKps[1], resolvedKps[2],
-          u <= 0.5 ? u / 0.5 : (u - 0.5) / 0.5
-        );
+        pt = evaluateCatmullRomTrajectory(resolvedKps, u);
       } else {
         pt = evaluateBezierTrajectory(resolvedKps, u);
       }
@@ -369,58 +392,136 @@ function renderOverlay(ctx, project, frameIndex, rect) {
 
     if (points.length < 2) continue;
 
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    // Polyline Path
-    const path = new Path2D();
-    path.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-      path.lineTo(points[i].x, points[i].y);
+    // Normal vectors at each sampled point
+    const normals = [];
+    for (let i = 0; i < points.length; i++) {
+      let tx, ty;
+      if (i === 0) {
+        tx = points[1].x - points[0].x;
+        ty = points[1].y - points[0].y;
+      } else if (i === points.length - 1) {
+        tx = points[i].x - points[i - 1].x;
+        ty = points[i].y - points[i - 1].y;
+      } else {
+        tx = points[i + 1].x - points[i - 1].x;
+        ty = points[i + 1].y - points[i - 1].y;
+      }
+      const len = Math.hypot(tx, ty);
+      if (len > 1e-5) {
+        // Unit normal (-ty/len, tx/len)
+        normals.push({ x: -ty / len, y: tx / len });
+      } else {
+        normals.push({ x: 0, y: -1 });
+      }
     }
 
-    // Gradient Shader along trajectory
+    // Width scale and taper calculation
+    const scaleFactor = Math.max(rect.w / 1080, 0.45);
+    const baseWidth = Math.max((style.lineWidth || 12) * scaleFactor * 1.5, 4);
+    const taper = style.taper !== undefined ? clamp01(style.taper) : 0.4;
+    const glow = clamp01(style.glow);
+
+    // Compute width w(s) at each point: s from 0 (tail) to 1 (head)
+    const leftEdges = [];
+    const rightEdges = [];
+
+    for (let i = 0; i < points.length; i++) {
+      const s = i / (points.length - 1);
+      let w;
+      if (style.trailMode === "comet") {
+        // Comet tapers sharply to 0 at tail
+        w = baseWidth * Math.pow(s, 1.25);
+      } else {
+        // Tracer & Full: tapers from tail to head
+        w = baseWidth * (taper + (1 - taper) * Math.sqrt(s));
+      }
+      const halfW = Math.max(w * 0.5, 0.5);
+      const nx = normals[i].x;
+      const ny = normals[i].y;
+
+      leftEdges.push({
+        x: points[i].x + nx * halfW,
+        y: points[i].y + ny * halfW
+      });
+      rightEdges.push({
+        x: points[i].x - nx * halfW,
+        y: points[i].y - ny * halfW
+      });
+    }
+
+    // Build closed Ribbon Polygon Path
+    const ribbonPath = new Path2D();
+    ribbonPath.moveTo(leftEdges[0].x, leftEdges[0].y);
+    for (let i = 1; i < leftEdges.length; i++) {
+      ribbonPath.lineTo(leftEdges[i].x, leftEdges[i].y);
+    }
+    // Rounded bullet head cap
+    const headPt = points[points.length - 1];
+    const headTangentX = points[points.length - 1].x - points[points.length - 2].x;
+    const headTangentY = points[points.length - 1].y - points[points.length - 2].y;
+    const headLen = Math.hypot(headTangentX, headTangentY);
+    if (headLen > 1e-4) {
+      const utx = headTangentX / headLen;
+      const uty = headTangentY / headLen;
+      const capTip = {
+        x: headPt.x + utx * (baseWidth * 0.4),
+        y: headPt.y + uty * (baseWidth * 0.4)
+      };
+      ribbonPath.quadraticCurveTo(capTip.x, capTip.y, rightEdges[rightEdges.length - 1].x, rightEdges[rightEdges.length - 1].y);
+    } else {
+      ribbonPath.lineTo(rightEdges[rightEdges.length - 1].x, rightEdges[rightEdges.length - 1].y);
+    }
+
+    for (let i = rightEdges.length - 2; i >= 0; i--) {
+      ribbonPath.lineTo(rightEdges[i].x, rightEdges[i].y);
+    }
+    ribbonPath.closePath();
+
+    // Centerline Spine Path for sharp core line
+    const spinePath = new Path2D();
+    spinePath.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      spinePath.lineTo(points[i].x, points[i].y);
+    }
+
+    // Gradient along trajectory
     const grad = ctx.createLinearGradient(
       points[0].x, points[0].y,
       points[points.length - 1].x, points[points.length - 1].y
     );
-    const colors = style.gradient;
+    const colors = style.gradient || PALETTES.neonCyan;
     colors.forEach((c, idx) => {
-      grad.addColorStop(idx / (colors.length - 1), c);
+      grad.addColorStop(idx / Math.max(colors.length - 1, 1), c);
     });
 
-    // Scale line width proportionally if rect differs from 1080 standard
-    const scaleFactor = Math.max(rect.w / 1080, 0.5);
-    const baseWidth = Math.max(style.lineWidth * scaleFactor, 1.5);
-    const glow = clamp01(style.glow);
-
-    // Layer 1: Outer Glow Bloom
+    // --- GLOW LAYER 1: Wide Blur Bloom ---
     ctx.save();
-    ctx.lineWidth = baseWidth * 3.5;
     ctx.shadowColor = colors[0];
-    ctx.shadowBlur = baseWidth * 2.0 * glow * 1.5;
-    ctx.strokeStyle = colors[0];
+    ctx.shadowBlur = baseWidth * 3.8 * glow;
+    ctx.fillStyle = colors[0];
     ctx.globalAlpha = 0.22 * glow;
-    ctx.stroke(path);
+    ctx.fill(ribbonPath);
     ctx.restore();
 
-    // Layer 2: Inner Glow
+    // --- GLOW LAYER 2: Vibrant Mid Glow ---
     ctx.save();
-    ctx.lineWidth = baseWidth * 1.8;
     ctx.shadowColor = colors[1] || colors[0];
-    ctx.shadowBlur = baseWidth * 0.8 * glow * 1.5;
-    ctx.strokeStyle = grad;
-    ctx.globalAlpha = 0.50 * glow;
-    ctx.stroke(path);
+    ctx.shadowBlur = baseWidth * 1.6 * glow;
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = 0.70 * glow;
+    ctx.fill(ribbonPath);
     ctx.restore();
 
-    // Layer 3: Core Sharp Line
+    // --- GLOW LAYER 3: Sharp Whitish Core Highlight ---
     ctx.save();
-    ctx.lineWidth = baseWidth;
-    ctx.strokeStyle = grad;
-    ctx.globalAlpha = 1.0;
-    ctx.stroke(path);
+    ctx.lineWidth = Math.max(baseWidth * 0.32, 1.8);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.shadowColor = "#FFFFFF";
+    ctx.shadowBlur = Math.max(baseWidth * 0.5 * glow, 2);
+    ctx.globalAlpha = 0.95;
+    ctx.stroke(spinePath);
     ctx.restore();
 
     // Impact Flash at Start point
@@ -432,82 +533,135 @@ function renderOverlay(ctx, project, frameIndex, rect) {
       ctx.shadowBlur = baseWidth * 3;
       ctx.globalAlpha = flashAlpha;
       ctx.beginPath();
-      ctx.arc(points[0].x, points[0].y, baseWidth * 2.5, 0, Math.PI * 2);
+      ctx.arc(points[0].x, points[0].y, baseWidth * 2.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
-    // Distance HUD Label (Positioned & collision-checked inside video rect)
+    // --- Ball / Spark at Head ---
+    const ballPos = points[points.length - 1];
+    const ballRadius = Math.max(baseWidth * 0.85, 4.0);
+
+    ctx.save();
+    // Glowing radial flare
+    const flareGrad = ctx.createRadialGradient(ballPos.x, ballPos.y, 0, ballPos.x, ballPos.y, ballRadius * 2.8);
+    flareGrad.addColorStop(0, "#FFFFFF");
+    flareGrad.addColorStop(0.35, colors[colors.length - 1] || "#00E5FF");
+    flareGrad.addColorStop(1, "rgba(0, 229, 255, 0)");
+    ctx.fillStyle = flareGrad;
+    ctx.beginPath();
+    ctx.arc(ballPos.x, ballPos.y, ballRadius * 2.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // White core sphere
+    ctx.fillStyle = "#FFFFFF";
+    ctx.shadowColor = "#FFFFFF";
+    ctx.shadowBlur = ballRadius * 2.2;
+    ctx.beginPath();
+    ctx.arc(ballPos.x, ballPos.y, ballRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Distance HUD Label (Scaled to ~6% of videoRect.h, clamped inside rect)
     if (trajectory.distance.visible && points.length > 0) {
-      const headPt = points[points.length - 1];
       const dist = Math.round(
         computeEasedDistance(trajectory.distance.value, flightState.progress, trajectory.distance.easing)
       );
+      const distText = `${dist} ${trajectory.distance.unit}`;
 
-      // Check collision with Keypoint Markers (Start/Apex/Landing) to prevent overlap
-      let offsetDirY = -1; // Default above head
-      if (headPt.y - 32 < rect.y + 10) {
-        offsetDirY = 1; // Flip below if too close to top edge
+      // Large bold text (~6% video height)
+      let hudFontSize = Math.max(Math.round(rect.h * 0.060), 12);
+      ctx.font = `800 ${hudFontSize}px 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif`;
+      let metrics = ctx.measureText(distText);
+
+      // Measure and ensure badge fits comfortably inside rect width
+      const maxAllowedBadgeW = rect.w * 0.82;
+      let paddingX = Math.round(hudFontSize * 0.55);
+      let badgeW = metrics.width + paddingX * 2;
+      if (badgeW > maxAllowedBadgeW) {
+        hudFontSize = Math.max(Math.floor(hudFontSize * (maxAllowedBadgeW / badgeW)), 10);
+        ctx.font = `800 ${hudFontSize}px 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif`;
+        metrics = ctx.measureText(distText);
+        paddingX = Math.round(hudFontSize * 0.55);
+        badgeW = metrics.width + paddingX * 2;
       }
+      const paddingY = Math.round(hudFontSize * 0.32);
+      const badgeH = hudFontSize + paddingY * 2;
 
-      // Check distance to keypoint labels
-      for (const kp of resolvedKps) {
-        const kx = rect.x + kp.x * rect.w;
-        const ky = rect.y + kp.y * rect.h;
-        const distToKp = Math.hypot(headPt.x - kx, (headPt.y + offsetDirY * 28) - ky);
-        if (distToKp < 36) {
-          offsetDirY = -offsetDirY; // Flip to opposite side
-          break;
-        }
-      }
+      const headNormal = normals[normals.length - 1];
+      const offsetDist = Math.max(hudFontSize * 1.3, 22);
 
-      const badgeX = Math.min(Math.max(headPt.x, rect.x + 45), rect.x + rect.w - 45);
-      const badgeY = Math.min(Math.max(headPt.y + offsetDirY * 28, rect.y + 16), rect.y + rect.h - 16);
+      // Offset along normal direction (away from trajectory curve)
+      let badgeX = ballPos.x + headNormal.x * offsetDist;
+      let badgeY = ballPos.y + headNormal.y * offsetDist;
 
-      renderDistanceBadge(ctx, badgeX, badgeY, `${dist} ${trajectory.distance.unit}`);
+      // Safe clamp inside videoRect so entire badge capsule is inside rect
+      const halfW = badgeW / 2;
+      const halfH = badgeH / 2;
+      const pad = 4;
+      badgeX = Math.min(Math.max(badgeX, rect.x + halfW + pad), rect.x + rect.w - halfW - pad);
+      badgeY = Math.min(Math.max(badgeY, rect.y + halfH + pad), rect.y + rect.h - halfH - pad);
+
+      renderDistanceBadge(ctx, badgeX, badgeY, distText, hudFontSize, badgeW, badgeH);
     }
 
     ctx.restore();
   }
 
-  // Watermark (Positioned strictly inside bottom-right of videoContentRect)
+  // Watermark (~2.2% of videoRect.h, positioned strictly inside bottom-right of videoContentRect)
   if (project.export && project.export.watermark) {
     ctx.save();
-    ctx.font = "bold 13px 'JetBrains Mono', monospace";
+    let wmFontSize = Math.max(Math.round(rect.h * 0.022), 8);
+    const wmText = "Traced with AceTrace";
+    ctx.font = `bold ${wmFontSize}px 'JetBrains Mono', monospace`;
+    let wmMetrics = ctx.measureText(wmText);
+    const maxWmW = rect.w * 0.85;
+    if (wmMetrics.width > maxWmW) {
+      wmFontSize = Math.max(Math.floor(wmFontSize * (maxWmW / wmMetrics.width)), 7);
+      ctx.font = `bold ${wmFontSize}px 'JetBrains Mono', monospace`;
+      wmMetrics = ctx.measureText(wmText);
+    }
+    const padX = Math.max(Math.round(rect.w * 0.03), 8);
+    const padY = Math.max(Math.round(rect.h * 0.02), 6);
     ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
-    ctx.fillText("Traced with AceTrace", rect.x + rect.w - 18, rect.y + rect.h - 14);
+    ctx.fillText(wmText, rect.x + rect.w - padX, rect.y + rect.h - padY);
     ctx.restore();
   }
 }
 
-function renderDistanceBadge(ctx, x, y, text) {
+function renderDistanceBadge(ctx, x, y, text, fontSize, w, h) {
   ctx.save();
-  ctx.font = "bold 13px 'JetBrains Mono', monospace";
-  const metrics = ctx.measureText(text);
-  const paddingX = 10;
-  const paddingY = 5;
-  const w = metrics.width + paddingX * 2;
-  const h = 24;
+  ctx.font = `800 ${fontSize}px 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif`;
 
   const rx = x - w / 2;
   const ry = y - h / 2;
 
-  // Badge background & border
-  ctx.fillStyle = "rgba(12, 12, 18, 0.88)";
-  ctx.strokeStyle = "rgba(0, 229, 255, 0.45)";
-  ctx.lineWidth = 1.5;
+  // Frosted dark badge capsule
+  ctx.save();
+  ctx.fillStyle = "rgba(10, 10, 16, 0.88)";
+  ctx.strokeStyle = "rgba(0, 229, 255, 0.75)";
+  ctx.lineWidth = Math.max(fontSize * 0.08, 1.8);
+  ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 3;
 
   ctx.beginPath();
-  ctx.roundRect(rx, ry, w, h, 6);
+  ctx.roundRect(rx, ry, w, h, Math.round(h / 2));
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
 
-  // Text
-  ctx.fillStyle = "#FFFFFF";
+  // Text with heavy dark stroke and bright fill for readability on any background
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+
+  ctx.lineWidth = Math.max(fontSize * 0.16, 3.0);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+  ctx.strokeText(text, x, y);
+
+  ctx.fillStyle = "#FFFFFF";
   ctx.fillText(text, x, y);
 
   ctx.restore();
@@ -586,10 +740,334 @@ function initDemoScene(preset = "golf-vertical") {
   document.getElementById("mode-bezier").classList.toggle("active", mode === "bezier");
   document.getElementById("mode-catmull").classList.toggle("active", mode === "catmullRom");
 
+  const phoneFrame = document.getElementById("phone-frame");
+  if (phoneFrame) {
+    phoneFrame.classList.toggle("horizontal", w > h);
+  }
+
   scrubber.max = 119;
   updateScrubberMarks();
   resizeCanvas();
+  setTimeout(resizeCanvas, 40);
   seekToFrame(0);
+}
+
+function drawAthleteFigure(ctx, ballX, ballY, w, h, frameIndex, sport = "golf") {
+  ctx.save();
+
+  const charScale = (Math.min(w, h) / 1080) * 3.4;
+  // Position athlete clearly to the left of the ball/tee so the START marker does NOT cover them
+  const charX = ballX - 38 * charScale;
+  const charY = ballY + 4 * charScale; // feet ground baseline
+
+  // 1. Soft Ambient Ground Shadows
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.beginPath();
+  // Shadow under lead (front) foot
+  ctx.ellipse(charX + 16 * charScale, charY, 14 * charScale, 4.5 * charScale, 0, 0, Math.PI * 2);
+  // Shadow under rear (back) foot
+  ctx.ellipse(charX - 16 * charScale, charY, 12 * charScale, 4 * charScale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Tee in ground at (ballX, ballY)
+  ctx.fillStyle = "#E2E8F0";
+  ctx.beginPath();
+  ctx.moveTo(ballX - 1.5 * charScale, ballY + 7 * charScale);
+  ctx.lineTo(ballX + 1.5 * charScale, ballY + 7 * charScale);
+  ctx.lineTo(ballX + 3.5 * charScale, ballY);
+  ctx.lineTo(ballX - 3.5 * charScale, ballY);
+  ctx.closePath();
+  ctx.fill();
+
+  if (sport === "golf") {
+    // GOLF ATHLETE
+    const isSwung = frameIndex >= 30;
+
+    // --- LEGS & SHOES ---
+    if (!isSwung) {
+      // Address / Backswing Stance
+      // Rear Foot & Shoe (Left side)
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.roundRect(charX - 25 * charScale, charY - 6 * charScale, 16 * charScale, 6 * charScale, 3 * charScale);
+      ctx.fill();
+      ctx.fillStyle = "#0F172A"; // Shoe sole
+      ctx.fillRect(charX - 25 * charScale, charY - 1.5 * charScale, 16 * charScale, 1.5 * charScale);
+
+      // Lead Foot & Shoe (Right side)
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.roundRect(charX + 8 * charScale, charY - 6 * charScale, 16 * charScale, 6 * charScale, 3 * charScale);
+      ctx.fill();
+      ctx.fillStyle = "#0F172A";
+      ctx.fillRect(charX + 8 * charScale, charY - 1.5 * charScale, 16 * charScale, 1.5 * charScale);
+
+      // Trousers (Athletic Charcoal Golf Slacks)
+      ctx.fillStyle = "#334155";
+      // Left leg
+      ctx.beginPath();
+      ctx.moveTo(charX - 20 * charScale, charY - 5 * charScale);
+      ctx.lineTo(charX - 22 * charScale, charY - 28 * charScale);
+      ctx.lineTo(charX - 7 * charScale, charY - 50 * charScale);
+      ctx.lineTo(charX - 3 * charScale, charY - 50 * charScale);
+      ctx.lineTo(charX - 10 * charScale, charY - 26 * charScale);
+      ctx.lineTo(charX - 10 * charScale, charY - 5 * charScale);
+      ctx.closePath();
+      ctx.fill();
+
+      // Right leg
+      ctx.beginPath();
+      ctx.moveTo(charX + 10 * charScale, charY - 5 * charScale);
+      ctx.lineTo(charX + 14 * charScale, charY - 26 * charScale);
+      ctx.lineTo(charX + 4 * charScale, charY - 50 * charScale);
+      ctx.lineTo(charX - 3 * charScale, charY - 50 * charScale);
+      ctx.lineTo(charX + 5 * charScale, charY - 28 * charScale);
+      ctx.lineTo(charX + 18 * charScale, charY - 5 * charScale);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Classic Professional Follow-through Finish Stance
+      // Front Foot firmly planted, pointed slightly open
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.roundRect(charX + 8 * charScale, charY - 6 * charScale, 17 * charScale, 6 * charScale, 3 * charScale);
+      ctx.fill();
+      ctx.fillStyle = "#0F172A";
+      ctx.fillRect(charX + 8 * charScale, charY - 1.5 * charScale, 17 * charScale, 1.5 * charScale);
+
+      // Back Foot on tiptoe (cleats visible, heel lifted!)
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.ellipse(charX - 16 * charScale, charY - 4 * charScale, 4.5 * charScale, 8 * charScale, Math.PI / 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#0F172A";
+      ctx.fillRect(charX - 19 * charScale, charY - 3 * charScale, 5 * charScale, 2 * charScale);
+
+      // Trousers in Follow-through (Hips rotated toward target)
+      ctx.fillStyle = "#334155";
+      // Back bent leg
+      ctx.beginPath();
+      ctx.moveTo(charX - 16 * charScale, charY - 6 * charScale);
+      ctx.lineTo(charX - 12 * charScale, charY - 25 * charScale);
+      ctx.lineTo(charX - 2 * charScale, charY - 48 * charScale);
+      ctx.lineTo(charX + 5 * charScale, charY - 48 * charScale);
+      ctx.lineTo(charX - 5 * charScale, charY - 25 * charScale);
+      ctx.lineTo(charX - 11 * charScale, charY - 6 * charScale);
+      ctx.closePath();
+      ctx.fill();
+
+      // Front straight leg
+      ctx.beginPath();
+      ctx.moveTo(charX + 10 * charScale, charY - 6 * charScale);
+      ctx.lineTo(charX + 12 * charScale, charY - 28 * charScale);
+      ctx.lineTo(charX + 8 * charScale, charY - 48 * charScale);
+      ctx.lineTo(charX + 1 * charScale, charY - 48 * charScale);
+      ctx.lineTo(charX + 4 * charScale, charY - 28 * charScale);
+      ctx.lineTo(charX + 16 * charScale, charY - 6 * charScale);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // --- BELT & HIPS ---
+    ctx.fillStyle = "#1E293B";
+    ctx.fillRect(charX - 7 * charScale, charY - 52 * charScale, 18 * charScale, 4 * charScale);
+    ctx.fillStyle = "#CBD5E1"; // Buckle
+    ctx.fillRect(charX + 1 * charScale, charY - 52 * charScale, 4 * charScale, 4 * charScale);
+
+    // --- POLO SHIRT (Torso & Shoulders) ---
+    // Vibrant Tour Red Polo with subtle shading
+    const poloGrad = ctx.createLinearGradient(charX, charY - 88 * charScale, charX, charY - 52 * charScale);
+    poloGrad.addColorStop(0, "#EF4444");
+    poloGrad.addColorStop(1, "#B91C1C");
+    ctx.fillStyle = poloGrad;
+
+    ctx.beginPath();
+    ctx.moveTo(charX - 8 * charScale, charY - 52 * charScale);
+    ctx.lineTo(charX + 12 * charScale, charY - 52 * charScale);
+    ctx.lineTo(charX + 16 * charScale, charY - 82 * charScale);
+    ctx.lineTo(charX - 12 * charScale, charY - 82 * charScale);
+    ctx.closePath();
+    ctx.fill();
+
+    // White Polo Collar
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath();
+    ctx.moveTo(charX - 3 * charScale, charY - 82 * charScale);
+    ctx.lineTo(charX + 6 * charScale, charY - 82 * charScale);
+    ctx.lineTo(charX + 2 * charScale, charY - 76 * charScale);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- HEAD, FACE & TOUR CAP ---
+    // Neck
+    ctx.fillStyle = "#F5D0B5";
+    ctx.fillRect(charX - 1 * charScale, charY - 88 * charScale, 6 * charScale, 8 * charScale);
+
+    // Head
+    ctx.fillStyle = "#F5D0B5";
+    ctx.beginPath();
+    ctx.ellipse(charX + 2 * charScale, charY - 94 * charScale, 7 * charScale, 8.5 * charScale, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Face features (Profile looking toward target / sky)
+    ctx.fillStyle = "#1E293B"; // Sunglasses
+    ctx.beginPath();
+    ctx.roundRect(charX + 4 * charScale, charY - 96 * charScale, 5.5 * charScale, 3 * charScale, 1 * charScale);
+    ctx.fill();
+
+    // White Tour Cap with Visor
+    ctx.fillStyle = "#FFFFFF";
+    // Cap dome
+    ctx.beginPath();
+    ctx.ellipse(charX + 1 * charScale, charY - 99 * charScale, 7.5 * charScale, 5 * charScale, 0.1, Math.PI, 0);
+    ctx.fill();
+    // Cap visor (Branded curved visor pointing toward shot direction)
+    ctx.beginPath();
+    ctx.moveTo(charX + 3 * charScale, charY - 97 * charScale);
+    ctx.lineTo(charX + 13 * charScale, charY - 99 * charScale);
+    ctx.lineTo(charX + 11 * charScale, charY - 95 * charScale);
+    ctx.lineTo(charX + 3 * charScale, charY - 94 * charScale);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- ARMS, GOLF GLOVE & CLUB ---
+    if (!isSwung) {
+      // Address / Swing Animation before frame 30
+      const swingProg = frameIndex / 30; // 0..1
+      // Arms hanging down towards ball at address
+      ctx.fillStyle = "#EF4444"; // Sleeve
+      ctx.beginPath();
+      ctx.ellipse(charX + 4 * charScale, charY - 78 * charScale, 5 * charScale, 7 * charScale, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Forearms (Skin)
+      ctx.fillStyle = "#F5D0B5";
+      ctx.beginPath();
+      ctx.moveTo(charX + 2 * charScale, charY - 74 * charScale);
+      ctx.lineTo(charX + 15 * charScale, charY - 62 * charScale);
+      ctx.lineTo(charX + 17 * charScale, charY - 64 * charScale);
+      ctx.lineTo(charX + 4 * charScale, charY - 76 * charScale);
+      ctx.closePath();
+      ctx.fill();
+
+      // White Golf Glove on hands
+      const handsX = charX + 16 * charScale;
+      const handsY = charY - 62 * charScale;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.arc(handsX, handsY, 4 * charScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Shaft & Club Head
+      const clubAngle = -Math.PI * 0.7 + swingProg * Math.PI * 1.1;
+      const shaftLen = 42 * charScale;
+      const clubHeadX = !isSwung && swingProg < 0.1 ? ballX : handsX + Math.cos(clubAngle) * shaftLen;
+      const clubHeadY = !isSwung && swingProg < 0.1 ? ballY : handsY + Math.sin(clubAngle) * shaftLen;
+
+      // Shaft (Metallic steel)
+      ctx.strokeStyle = "#CBD5E1";
+      ctx.lineWidth = 2.5 * charScale;
+      ctx.beginPath();
+      ctx.moveTo(handsX, handsY);
+      ctx.lineTo(clubHeadX, clubHeadY);
+      ctx.stroke();
+
+      // Driver head
+      ctx.fillStyle = "#0F172A";
+      ctx.beginPath();
+      ctx.ellipse(clubHeadX, clubHeadY, 5 * charScale, 3.5 * charScale, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Golf Ball sitting on tee
+      ctx.fillStyle = "#FFFFFF";
+      ctx.shadowColor = "#FFFFFF";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(ballX, ballY, 4.5 * charScale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      // Classic Majestic High Follow-Through Finish (Arms up & wrap behind head)
+      ctx.fillStyle = "#EF4444";
+      ctx.beginPath();
+      ctx.moveTo(charX + 4 * charScale, charY - 82 * charScale);
+      ctx.lineTo(charX - 6 * charScale, charY - 100 * charScale);
+      ctx.lineTo(charX - 12 * charScale, charY - 96 * charScale);
+      ctx.lineTo(charX - 2 * charScale, charY - 80 * charScale);
+      ctx.closePath();
+      ctx.fill();
+
+      // Forearms & Hands raised behind shoulders
+      ctx.fillStyle = "#F5D0B5";
+      ctx.beginPath();
+      ctx.moveTo(charX - 6 * charScale, charY - 100 * charScale);
+      ctx.lineTo(charX - 16 * charScale, charY - 108 * charScale);
+      ctx.lineTo(charX - 18 * charScale, charY - 104 * charScale);
+      ctx.lineTo(charX - 10 * charScale, charY - 96 * charScale);
+      ctx.closePath();
+      ctx.fill();
+
+      // White Golf Glove Hands holding grip high
+      const handsX = charX - 18 * charScale;
+      const handsY = charY - 108 * charScale;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.beginPath();
+      ctx.arc(handsX, handsY, 4.5 * charScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Club Shaft resting over shoulder at finish
+      const clubHeadX = charX + 16 * charScale;
+      const clubHeadY = charY - 118 * charScale;
+      ctx.strokeStyle = "#CBD5E1";
+      ctx.lineWidth = 2.5 * charScale;
+      ctx.beginPath();
+      ctx.moveTo(handsX, handsY);
+      ctx.lineTo(clubHeadX, clubHeadY);
+      ctx.stroke();
+
+      // Club Head
+      ctx.fillStyle = "#0F172A";
+      ctx.beginPath();
+      ctx.ellipse(clubHeadX, clubHeadY, 5 * charScale, 3.5 * charScale, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // DISC GOLF ATHLETE (Throwing pose)
+    const isThrown = frameIndex >= 30;
+    // Athletic shorts & athletic tee
+    ctx.fillStyle = "#1E293B"; // Shorts
+    ctx.fillRect(charX - 12 * charScale, charY - 40 * charScale, 24 * charScale, 20 * charScale);
+    // Legs
+    ctx.fillStyle = "#F5D0B5";
+    ctx.fillRect(charX - 10 * charScale, charY - 20 * charScale, 7 * charScale, 16 * charScale);
+    ctx.fillRect(charX + 3 * charScale, charY - 20 * charScale, 7 * charScale, 16 * charScale);
+    // Shoes
+    ctx.fillStyle = "#00E5FF";
+    ctx.fillRect(charX - 12 * charScale, charY - 4 * charScale, 11 * charScale, 5 * charScale);
+    ctx.fillRect(charX + 3 * charScale, charY - 4 * charScale, 11 * charScale, 5 * charScale);
+    // Shirt
+    ctx.fillStyle = "#0284C7";
+    ctx.fillRect(charX - 14 * charScale, charY - 76 * charScale, 28 * charScale, 36 * charScale);
+    // Head & Cap
+    ctx.fillStyle = "#F5D0B5";
+    ctx.beginPath();
+    ctx.arc(charX, charY - 88 * charScale, 9 * charScale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#0F172A";
+    ctx.fillRect(charX - 9 * charScale, charY - 98 * charScale, 22 * charScale, 6 * charScale);
+
+    // Throwing Arm
+    ctx.fillStyle = "#F5D0B5";
+    if (!isThrown) {
+      // Wind up
+      ctx.fillRect(charX - 28 * charScale, charY - 72 * charScale, 16 * charScale, 6 * charScale);
+    } else {
+      // Extended forward release
+      ctx.fillRect(charX + 12 * charScale, charY - 72 * charScale, 26 * charScale, 6 * charScale);
+    }
+  }
+
+  ctx.restore();
 }
 
 function renderDemoFrame(frameIndex, sport = "golf") {
@@ -597,7 +1075,39 @@ function renderDemoFrame(frameIndex, sport = "golf") {
   const w = demoCanvas.width;
   const h = demoCanvas.height;
 
-  // 1. Sky & Atmosphere
+  // 0. Photorealistic Championship Golf Course Image (matches official Ace Trace App Store app!)
+  const bgImg = (w > h) ? demoBgHorizontal : demoBgVertical;
+  if (bgImg && bgImg.complete && bgImg.naturalWidth > 0 && sport === "golf") {
+    ctx.drawImage(bgImg, 0, 0, w, h);
+
+    // Ball flying in background after frame 30
+    if (frameIndex >= 30) {
+      const startKp = state.project.trajectories[0].keypoints[0];
+      const apexKp = state.project.trajectories[0].keypoints[1];
+      const landingKp = state.project.trajectories[0].keypoints[2];
+      const fState = computeTimeMapping(frameIndex, startKp.frameIndex, apexKp.frameIndex, landingKp.frameIndex);
+
+      const resolved = resolveKeypointHandles(state.project.trajectories[0].keypoints);
+      let ballPos;
+      if (state.project.trajectories[0].mode === "catmullRom") {
+        ballPos = evaluateCatmullRomTrajectory(resolved, fState.u);
+      } else {
+        ballPos = evaluateBezierTrajectory(resolved, fState.u);
+      }
+
+      ctx.save();
+      ctx.fillStyle = "#FFFFFF";
+      ctx.shadowColor = "#FFFFFF";
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(ballPos.x * w, ballPos.y * h, 7 * (Math.min(w, h) / 1080) * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    return;
+  }
+
+  // 1. Fallback: Sky & Atmosphere
   const skyGrad = ctx.createLinearGradient(0, 0, 0, h * 0.6);
   skyGrad.addColorStop(0, "#122538");
   skyGrad.addColorStop(0.6, "#2E5576");
@@ -642,50 +1152,75 @@ function renderDemoFrame(frameIndex, sport = "golf") {
     ctx.fill();
   }
 
-  // 2. Athlete Figure at Start position
-  const startKp = state.project.trajectories[0].keypoints[0];
-  const charX = startKp.x * w;
-  const charY = startKp.y * h;
-  const charScale = Math.min(w, h) / 1080;
+  // 2. Putting Green and Flagstick at Landing position
+  const landingKp = state.project.trajectories[0].keypoints[2];
+  const landX = landingKp.x * w;
+  const landY = landingKp.y * h;
 
   ctx.save();
-  // Shadow
-  ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+  // Green fringe & putting surface
+  ctx.fillStyle = "#2D6822";
   ctx.beginPath();
-  ctx.ellipse(charX, charY + 5 * charScale, 24 * charScale, 8 * charScale, 0, 0, Math.PI * 2);
+  ctx.ellipse(landX, landY, Math.min(w, h) * 0.12, Math.min(w, h) * 0.055, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Shirt
-  ctx.fillStyle = sport === "golf" ? "#D43F3F" : "#2E78D6";
-  ctx.fillRect(charX - 12 * charScale, charY - 60 * charScale, 24 * charScale, 40 * charScale);
-
-  // Pants
-  ctx.fillStyle = "#1E2A38";
-  ctx.fillRect(charX - 10 * charScale, charY - 20 * charScale, 9 * charScale, 25 * charScale);
-  ctx.fillRect(charX + 1 * charScale, charY - 20 * charScale, 9 * charScale, 25 * charScale);
-
-  // Head
-  ctx.fillStyle = "#ECC39E";
+  ctx.fillStyle = "#3BA328";
   ctx.beginPath();
-  ctx.arc(charX, charY - 72 * charScale, 11 * charScale, 0, Math.PI * 2);
+  ctx.ellipse(landX, landY, Math.min(w, h) * 0.09, Math.min(w, h) * 0.04, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Swing motion / Disc throw
-  ctx.strokeStyle = "#FFFFFF";
-  ctx.lineWidth = 3.5 * charScale;
-  ctx.beginPath();
-  if (frameIndex < 30) {
-    const angle = -Math.PI / 4 + (frameIndex / 30) * Math.PI;
-    ctx.moveTo(charX, charY - 45 * charScale);
-    ctx.lineTo(charX + Math.cos(angle) * 55 * charScale, charY - 45 * charScale + Math.sin(angle) * 55 * charScale);
+  if (sport === "disc") {
+    // Disc Golf Basket
+    const poleH = Math.min(w, h) * 0.08;
+    ctx.strokeStyle = "#CCCCCC";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(landX, landY);
+    ctx.lineTo(landX, landY - poleH);
+    ctx.stroke();
+
+    // Basket tray
+    ctx.fillStyle = "#FFCC00";
+    ctx.fillRect(landX - 16, landY - poleH * 0.45, 32, 10);
+    // Yellow top band
+    ctx.fillRect(landX - 18, landY - poleH, 36, 8);
   } else {
-    ctx.moveTo(charX, charY - 45 * charScale);
-    ctx.lineTo(charX - 35 * charScale, charY - 70 * charScale);
+    // Golf Flagstick
+    const flagH = Math.min(w, h) * 0.09;
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(landX, landY);
+    ctx.lineTo(landX, landY - flagH);
+    ctx.stroke();
+
+    // Red flag banner fluttering
+    ctx.fillStyle = "#FF2233";
+    ctx.beginPath();
+    ctx.moveTo(landX, landY - flagH);
+    ctx.lineTo(landX + Math.min(w, h) * 0.045, landY - flagH + 8);
+    ctx.lineTo(landX, landY - flagH + 16);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cup hole
+    ctx.fillStyle = "#111111";
+    ctx.beginPath();
+    ctx.ellipse(landX, landY, 5, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
-  ctx.stroke();
   ctx.restore();
 
-  // 3. Projectile (Ball or Disc) flying in background
+  // 3. Athlete Figure (Professional Golfer / Disc Thrower) positioned beside Start position
+  const startKp = state.project.trajectories[0].keypoints[0];
+  const ballX = startKp.x * w;
+  const ballY = startKp.y * h;
+  drawAthleteFigure(ctx, ballX, ballY, w, h, frameIndex, sport);
+
+
+  const charScale = (Math.min(w, h) / 1080) * 3.4;
+
+  // 4. Projectile (Ball or Disc) flying in background
   if (frameIndex >= 30) {
     const apexKp = state.project.trajectories[0].keypoints[1];
     const landingKp = state.project.trajectories[0].keypoints[2];
@@ -694,10 +1229,7 @@ function renderDemoFrame(frameIndex, sport = "golf") {
     const resolved = resolveKeypointHandles(state.project.trajectories[0].keypoints);
     let ballPos;
     if (state.project.trajectories[0].mode === "catmullRom") {
-      ballPos = evaluateCatmullRom(
-        resolved[0], resolved[0], resolved[1], resolved[2],
-        fState.u <= 0.5 ? fState.u / 0.5 : (fState.u - 0.5) / 0.5
-      );
+      ballPos = evaluateCatmullRomTrajectory(resolved, fState.u);
     } else {
       ballPos = evaluateBezierTrajectory(resolved, fState.u);
     }
@@ -708,7 +1240,7 @@ function renderDemoFrame(frameIndex, sport = "golf") {
     ctx.shadowBlur = 12;
     ctx.beginPath();
     if (sport === "disc") {
-      ctx.ellipse(ballPos.x * w, ballPos.y * h, 12 * charScale, 4 * charScale, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(ballPos.x * w, ballPos.y * h, 14 * charScale, 5 * charScale, 0.2, 0, Math.PI * 2);
     } else {
       ctx.arc(ballPos.x * w, ballPos.y * h, 7 * charScale, 0, Math.PI * 2);
     }
@@ -731,15 +1263,23 @@ function resizeCanvas() {
   magnifierCanvas.width = 120;
   magnifierCanvas.height = 120;
 
-  // Compute exact videoContentRect
-  state.videoContentRect = computeVideoContentRect(
+  // Single authoritative computeVideoRect
+  state.videoContentRect = computeVideoRect(
     rect.width,
     rect.height,
     state.project.video.width,
-    state.project.video.height
+    state.project.video.height,
+    state.project.video.rotationDegrees || 0
   );
 
-  statRect.textContent = `${state.videoContentRect.w}x${state.videoContentRect.h} (at ${state.videoContentRect.x},${state.videoContentRect.y})`;
+  // Requirement A.3: "Source 1080x1920 | Hiển thị 281x500"
+  statRect.textContent = `Source ${state.project.video.width}x${state.project.video.height} | Hiển thị ${state.videoContentRect.w}x${state.videoContentRect.h}`;
+
+  // Toggle compact toolbar if mobile phone frame is narrow
+  const phoneFrame = document.getElementById("phone-frame");
+  if (phoneFrame) {
+    phoneFrame.classList.toggle("compact-toolbar", state.videoContentRect.w < 280);
+  }
 
   // If user video element is active, position it to match videoContentRect exactly
   if (isUsingUserVideo) {
@@ -770,16 +1310,41 @@ function renderCurrentFrame() {
     );
   }
 
-  // Draw subtle boundary line around active video content rect
-  overlayCtx.save();
-  overlayCtx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-  overlayCtx.lineWidth = 1;
-  overlayCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-  overlayCtx.restore();
-
   // 2. Call the SINGLE unified renderOverlay function for preview!
   renderOverlay(overlayCtx, state.project, state.currentFrame, rect);
 
+  // Requirement 5 & 2: Debug label placed inside rect, bottom-left corner, small size scaled with videoRect
+  if (state.debugRect) {
+    overlayCtx.save();
+    overlayCtx.strokeStyle = "#FF3B30";
+    overlayCtx.lineWidth = 1.5;
+    overlayCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+    let debugFontSize = Math.max(Math.round(rect.h * 0.020), 8);
+    overlayCtx.font = `bold ${debugFontSize}px 'JetBrains Mono', monospace`;
+    const debugText = `[DEBUG: ${rect.w}x${rect.h} @ (${rect.x},${rect.y})]`;
+    let m = overlayCtx.measureText(debugText);
+    const maxDebugW = rect.w * 0.65;
+    if (m.width > maxDebugW) {
+      debugFontSize = Math.max(Math.floor(debugFontSize * (maxDebugW / m.width)), 7);
+      overlayCtx.font = `bold ${debugFontSize}px 'JetBrains Mono', monospace`;
+      m = overlayCtx.measureText(debugText);
+    }
+
+    const pad = Math.max(Math.round(rect.h * 0.012), 4);
+    const bgW = m.width + 6;
+    const bgH = debugFontSize + 4;
+    overlayCtx.fillStyle = "rgba(0, 0, 0, 0.75)";
+    overlayCtx.fillRect(rect.x + pad - 2, rect.y + rect.h - pad - bgH + 2, bgW, bgH);
+
+    overlayCtx.fillStyle = "#FF3B30";
+    overlayCtx.textAlign = "left";
+    overlayCtx.textBaseline = "bottom";
+    overlayCtx.fillText(debugText, rect.x + pad + 1, rect.y + rect.h - pad);
+    overlayCtx.restore();
+  }
+
+  renderSvgHandles();
   updateStatusChips();
 }
 
@@ -819,15 +1384,73 @@ function updateScrubberMarks() {
 }
 
 function renderSvgHandles() {
+  // Requirement 3: Only show in edit/paused mode, hide completely when playing
+  if (state.isPlaying) {
+    handlesSvg.innerHTML = "";
+    handlesSvg.style.pointerEvents = "none";
+    return;
+  }
+  handlesSvg.style.pointerEvents = "all";
+
   const rect = state.videoContentRect;
   const kps = state.project.trajectories[0].keypoints;
   const resolved = resolveKeypointHandles(kps);
 
-  let svgHtml = "";
+  // Scaled font size (~2.5% of videoRect.h)
+  let labelFontSize = Math.max(Math.round(rect.h * 0.025), 9);
+  const anchorRadius = Math.max(Math.round(rect.h * 0.016), 6);
+  const outerRadius = anchorRadius + 5;
+  const handleRadius = Math.max(Math.round(anchorRadius * 0.45), 4);
 
-  resolved.forEach(kp => {
+  // Determine positions of all keypoints
+  const points = resolved.map(kp => {
     const cx = rect.x + kp.x * rect.w;
     const cy = rect.y + kp.y * rect.h;
+    const text = kp.role.toUpperCase();
+    return { kp, cx, cy, text, side: "above" };
+  });
+
+  // Anti-collision: if two keypoints are within 6% of video height (Math.abs(y1 - y2) < rect.h * 0.06),
+  // shift one to opposite side (below)
+  const collisionThreshold = rect.h * 0.06;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      if (Math.abs(points[i].cy - points[j].cy) < collisionThreshold) {
+        // Shift the physically lower one (larger cy) to "below"
+        if (points[i].cy >= points[j].cy) {
+          points[i].side = "below";
+        } else {
+          points[j].side = "below";
+        }
+      }
+    }
+  }
+
+  // Also if a point is too close to top edge, place label below; if too close to bottom edge, place above
+  points.forEach(p => {
+    if (p.cy - outerRadius - labelFontSize - 4 < rect.y) {
+      p.side = "below";
+    } else if (p.cy + outerRadius + labelFontSize + 4 > rect.y + rect.h) {
+      p.side = "above";
+    }
+  });
+
+  // Check measureText for labels to ensure they don't exceed rect width
+  overlayCtx.save();
+  overlayCtx.font = `bold ${labelFontSize}px 'JetBrains Mono', monospace`;
+  points.forEach(p => {
+    let textW = overlayCtx.measureText(p.text).width;
+    if (textW > rect.w * 0.35) {
+      labelFontSize = Math.max(Math.floor(labelFontSize * (rect.w * 0.35 / textW)), 8);
+      overlayCtx.font = `bold ${labelFontSize}px 'JetBrains Mono', monospace`;
+    }
+  });
+  overlayCtx.restore();
+
+  let svgHtml = "";
+
+  points.forEach(p => {
+    const { kp, cx, cy, text, side } = p;
     const color = kp.role === "start" ? "#00FF66" : kp.role === "apex" ? "#00E5FF" : "#FF2D95";
 
     // Handle In & Out Lines
@@ -835,21 +1458,33 @@ function renderSvgHandles() {
       const hx = rect.x + kp.handleIn.x * rect.w;
       const hy = rect.y + kp.handleIn.y * rect.h;
       svgHtml += `<line x1="${cx}" y1="${cy}" x2="${hx}" y2="${hy}" stroke="rgba(255,255,255,0.45)" stroke-dasharray="3,3" stroke-width="1.5"/>`;
-      svgHtml += `<circle cx="${hx}" cy="${hy}" r="5" fill="#FFFFFF" stroke="#00E5FF" stroke-width="1.5" class="drag-handle" data-role="${kp.role}" data-type="handleIn" style="cursor: pointer;"/>`;
+      svgHtml += `<circle cx="${hx}" cy="${hy}" r="${handleRadius}" fill="#FFFFFF" stroke="#00E5FF" stroke-width="1.5" class="drag-handle" data-role="${kp.role}" data-type="handleIn" style="cursor: pointer;"/>`;
     }
     if (kp.handleOut) {
       const hx = rect.x + kp.handleOut.x * rect.w;
       const hy = rect.y + kp.handleOut.y * rect.h;
       svgHtml += `<line x1="${cx}" y1="${cy}" x2="${hx}" y2="${hy}" stroke="rgba(255,255,255,0.45)" stroke-dasharray="3,3" stroke-width="1.5"/>`;
-      svgHtml += `<circle cx="${hx}" cy="${hy}" r="5" fill="#FFFFFF" stroke="#00E5FF" stroke-width="1.5" class="drag-handle" data-role="${kp.role}" data-type="handleOut" style="cursor: pointer;"/>`;
+      svgHtml += `<circle cx="${hx}" cy="${hy}" r="${handleRadius}" fill="#FFFFFF" stroke="#00E5FF" stroke-width="1.5" class="drag-handle" data-role="${kp.role}" data-type="handleOut" style="cursor: pointer;"/>`;
     }
 
-    // Anchor Point
+    // Label position calculation
+    let labelY;
+    if (side === "above") {
+      labelY = cy - outerRadius - 4;
+    } else {
+      labelY = cy + outerRadius + labelFontSize + 2;
+    }
+
+    // Clamp labelX inside videoRect so text does not bleed outside
+    const halfTextW = (text.length * labelFontSize * 0.65) / 2;
+    const labelX = Math.min(Math.max(cx, rect.x + halfTextW + 4), rect.x + rect.w - halfTextW - 4);
+
+    // Anchor Point & Label
     svgHtml += `
       <g class="drag-kp" data-role="${kp.role}" style="cursor: grab;">
-        <circle cx="${cx}" cy="${cy}" r="12" fill="${color}" fill-opacity="0.3" stroke="${color}" stroke-width="2"/>
-        <circle cx="${cx}" cy="${cy}" r="5" fill="#FFFFFF"/>
-        <text x="${cx}" y="${cy - 16}" fill="#FFFFFF" font-size="11" font-weight="bold" font-family="'JetBrains Mono', monospace" text-anchor="middle">${kp.role.toUpperCase()}</text>
+        <circle cx="${cx}" cy="${cy}" r="${outerRadius}" fill="${color}" fill-opacity="0.3" stroke="${color}" stroke-width="2"/>
+        <circle cx="${cx}" cy="${cy}" r="${Math.max(Math.round(anchorRadius * 0.45), 3)}" fill="#FFFFFF"/>
+        <text x="${labelX}" y="${labelY}" fill="#FFFFFF" font-size="${labelFontSize}" font-weight="bold" font-family="'JetBrains Mono', monospace" text-anchor="middle" filter="drop-shadow(0px 1px 3px rgba(0,0,0,0.9))">${text}</text>
       </g>
     `;
   });
@@ -917,6 +1552,7 @@ function stepFrame(delta) {
 
 function togglePlay() {
   state.isPlaying = !state.isPlaying;
+  renderSvgHandles();
   if (state.isPlaying) {
     playIcon.classList.add("hidden");
     pauseIcon.classList.remove("hidden");
@@ -1122,6 +1758,69 @@ inputWidth.addEventListener("input", e => {
   renderCurrentFrame();
 });
 
+// Taper slider
+const inputTaper = document.getElementById("input-taper");
+if (inputTaper) {
+  inputTaper.addEventListener("input", e => {
+    const val = parseInt(e.target.value, 10);
+    document.getElementById("taper-val").textContent = `${val}%`;
+    state.project.trajectories[0].style.taper = val / 100;
+    renderCurrentFrame();
+  });
+}
+
+// Debug Rect Checkbox
+const checkDebug = document.getElementById("check-debug");
+if (checkDebug) {
+  state.debugRect = checkDebug.checked;
+  checkDebug.addEventListener("change", e => {
+    state.debugRect = e.target.checked;
+    renderCurrentFrame();
+  });
+}
+
+// Sidebar toggle button (Collapsible desktop sidebar)
+const btnToggleSidebar = document.getElementById("btn-toggle-sidebar");
+const sidebar = document.getElementById("sidebar");
+const toggleIcon = document.getElementById("toggle-icon");
+if (btnToggleSidebar && sidebar) {
+  btnToggleSidebar.addEventListener("click", () => {
+    sidebar.classList.toggle("collapsed");
+    const isCollapsed = sidebar.classList.contains("collapsed");
+    if (toggleIcon) toggleIcon.textContent = isCollapsed ? "▶" : "◀";
+    setTimeout(resizeCanvas, 50);
+    setTimeout(resizeCanvas, 280);
+  });
+}
+
+// Mobile color dots
+document.querySelectorAll(".mobile-dot").forEach(dot => {
+  dot.addEventListener("click", () => {
+    document.querySelectorAll(".mobile-dot").forEach(d => d.classList.remove("active"));
+    dot.classList.add("active");
+    const pal = dot.dataset.palette;
+    state.project.trajectories[0].style.palette = pal;
+    state.project.trajectories[0].style.gradient = PALETTES[pal];
+    document.querySelectorAll(".palette-swatch").forEach(s => {
+      s.classList.toggle("active", s.dataset.palette === pal);
+    });
+    renderCurrentFrame();
+  });
+});
+
+// Mobile tab buttons
+document.querySelectorAll(".mobile-tab-btn").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".mobile-tab-btn").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    if (sidebar && sidebar.classList.contains("collapsed")) {
+      sidebar.classList.remove("collapsed");
+      if (toggleIcon) toggleIcon.textContent = "◀";
+      setTimeout(resizeCanvas, 280);
+    }
+  });
+});
+
 // Distance HUD controls
 document.getElementById("check-hud-visible").addEventListener("change", e => {
   state.project.trajectories[0].distance.visible = e.target.checked;
@@ -1227,8 +1926,10 @@ function getNormalizedProjectJSON() {
           ...(kp.handleOut ? { handleOut: { x: parseFloat(kp.handleOut.x.toFixed(4)), y: parseFloat(kp.handleOut.y.toFixed(4)) } } : {})
         })),
         style: {
+          palette: state.project.trajectories[0].style.palette || "neonCyan",
           gradient: state.project.trajectories[0].style.gradient,
           lineWidth: state.project.trajectories[0].style.lineWidth,
+          taper: state.project.trajectories[0].style.taper ?? 0.40,
           glow: state.project.trajectories[0].style.glow,
           trailMode: state.project.trajectories[0].style.trailMode,
           showImpactFlash: state.project.trajectories[0].style.showImpactFlash
@@ -1303,7 +2004,8 @@ document.getElementById("json-file-input").addEventListener("change", e => {
             style: {
               palette: traj.style?.palette || "neonCyan",
               gradient: traj.style?.gradient || ["#00E5FF", "#FF2D95", "#FFB300"],
-              lineWidth: traj.style?.lineWidth || 8,
+              lineWidth: traj.style?.lineWidth || 12,
+              taper: traj.style?.taper ?? 0.40,
               glow: traj.style?.glow ?? 0.75,
               trailMode: traj.style?.trailMode || "tracer",
               cometLengthFraction: traj.style?.cometLengthFraction || 0.25,
@@ -1324,6 +2026,21 @@ document.getElementById("json-file-input").addEventListener("change", e => {
       demoCanvas.width = state.project.video.width;
       demoCanvas.height = state.project.video.height;
       scrubber.max = Math.max(state.project.video.frameCount - 1, 1);
+
+      // Sync UI sliders
+      const loadedTraj = state.project.trajectories[0];
+      if (inputWidth) {
+        inputWidth.value = loadedTraj.style.lineWidth;
+        document.getElementById("width-val").textContent = `${loadedTraj.style.lineWidth} px`;
+      }
+      if (inputTaper) {
+        inputTaper.value = Math.round(loadedTraj.style.taper * 100);
+        document.getElementById("taper-val").textContent = `${Math.round(loadedTraj.style.taper * 100)}%`;
+      }
+      if (inputGlow) {
+        inputGlow.value = Math.round(loadedTraj.style.glow * 100);
+        document.getElementById("glow-val").textContent = `${Math.round(loadedTraj.style.glow * 100)}%`;
+      }
 
       updateScrubberMarks();
       resizeCanvas();
@@ -1368,10 +2085,7 @@ function generateGoldenVectorData(mode = "bezier") {
     const flightState = computeTimeMapping(frame, startKp.frameIndex, apexKp.frameIndex, landingKp.frameIndex);
     let pt;
     if (mode === "catmullRom") {
-      pt = evaluateCatmullRom(
-        resolvedKps[0], resolvedKps[0], resolvedKps[1], resolvedKps[2],
-        flightState.u <= 0.5 ? flightState.u / 0.5 : (flightState.u - 0.5) / 0.5
-      );
+      pt = evaluateCatmullRomTrajectory(resolvedKps, flightState.u);
     } else {
       pt = evaluateBezierTrajectory(resolvedKps, flightState.u);
     }
@@ -1505,6 +2219,14 @@ async function startExportPipeline() {
 // ==========================================
 
 window.addEventListener("resize", resizeCanvas);
+
+// Automatic ResizeObserver on viewport container
+if (window.ResizeObserver && viewport) {
+  const ro = new ResizeObserver(() => {
+    resizeCanvas();
+  });
+  ro.observe(viewport);
+}
 
 // Initialize default scene: Golf Dọc 9:16
 initDemoScene("golf-vertical");
